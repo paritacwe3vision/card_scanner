@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 
@@ -17,11 +17,11 @@ export default function LogoutButton() {
     setIsLoading(true);
 
     try {
+      // Get current logged-in user
       const storedUser = localStorage.getItem(
         "card_scanner_user"
       );
 
-      // No user stored
       if (!storedUser) {
         router.replace("/login");
         return;
@@ -29,16 +29,16 @@ export default function LogoutButton() {
 
       const user = JSON.parse(storedUser);
 
-      // Tell FastAPI to move user
+      // Move user:
       // login table → logout table
       await logoutUser(user.id);
 
-      // Clear frontend login state
+      // Remove current frontend session
       localStorage.removeItem(
         "card_scanner_user"
       );
 
-      // Redirect to login
+      // Redirect to login page
       router.replace("/login");
 
       router.refresh();
@@ -54,27 +54,30 @@ export default function LogoutButton() {
     }
   };
 
-return (
-  <button
-    type="button"
-    onClick={handleLogout}
-    disabled={isLoading}
-    className="
-      flex items-center gap-2
-      px-3 py-2
-      rounded-lg
-      text-sm font-medium
-      text-gray-600
-      hover:text-red-600
-      hover:bg-red-50
-      transition-all duration-200
-      disabled:opacity-50
-      disabled:cursor-not-allowed
-    "
-  >
-    <LogOut className="w-4 h-4" />
 
-    {isLoading ? "Logging out..." : "Logout"}
-  </button>
-);
+  return (
+    <button
+      type="button"
+      onClick={handleLogout}
+      disabled={isLoading}
+      className="
+        flex items-center gap-2
+        px-3 py-2
+        rounded-lg
+        text-sm font-medium
+        text-gray-600
+        hover:text-red-600
+        hover:bg-red-50
+        transition-all duration-200
+        disabled:opacity-50
+        disabled:cursor-not-allowed
+      "
+    >
+      <LogOut className="w-4 h-4" />
+
+      {isLoading
+        ? "Logging out..."
+        : "Logout"}
+    </button>
+  );
 }

@@ -149,11 +149,10 @@ def login(data: LoginRequest):
             detail=str(e)
         )
 
-
 @router.post("/logout")
 def logout(data: LogoutRequest):
     try:
-        # Find logged-in user
+        # 1. Find current user in login table
         response = (
             supabase
             .table("login")
@@ -170,17 +169,17 @@ def logout(data: LogoutRequest):
 
         user = response.data[0]
 
-        # Move user to logout table
+        # 2. Copy user to logout table
         logout_response = (
             supabase
             .table("logout")
-            .insert({
+            .upsert({
                 "id": user.get("id"),
                 "email": user.get("email"),
                 "full_name": user.get("full_name"),
                 "password": user.get("password"),
                 "created_at": user.get("created_at"),
-                "updated_at": user.get("updated_at")
+                "updated_at": user.get("updated_at"),
             })
             .execute()
         )
@@ -188,10 +187,10 @@ def logout(data: LogoutRequest):
         if not logout_response.data:
             raise HTTPException(
                 status_code=500,
-                detail="Unable to logout user"
+                detail="Could not move user to logout table"
             )
 
-        # Remove user from login table
+        # 3. Delete user from login table
         (
             supabase
             .table("login")

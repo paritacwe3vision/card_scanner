@@ -173,24 +173,7 @@ export default function LoginPage() {
                     focus:ring-primary-500
                   "
                 />
-
-                <span className="text-gray-600">
-                  Remember me
-                </span>
-
               </label>
-
-
-              <button
-                type="button"
-                className="
-                  text-primary-600
-                  hover:underline
-                  font-medium
-                "
-              >
-                Forgot password?
-              </button>
 
             </div>
 

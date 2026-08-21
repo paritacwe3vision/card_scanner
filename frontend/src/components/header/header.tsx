@@ -1,17 +1,34 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import LogoutButton from "@/components/pages/LogoutButton";
 
+
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
 
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+
+  // Check current logged-in user
+  useEffect(() => {
+    const storedUser = localStorage.getItem(
+      "card_scanner_user"
+    );
+
+    setIsLoggedIn(!!storedUser);
+  }, [pathname]);
+
+
   const isAuthPage =
-    pathname === "/login" || pathname === "/signup";
+    pathname === "/login" ||
+    pathname === "/signup";
+
 
   const navLinkClass = (path: string) =>
     `px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
@@ -20,16 +37,24 @@ export default function Header() {
         : "text-gray-600 hover:text-primary-600 hover:bg-gray-50"
     }`;
 
+
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
+
       <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-10">
+
         <div className="h-[72px] flex items-center justify-between">
 
-          {/* Logo */}
+
+          {/* =====================================================
+              LOGO
+          ===================================================== */}
+
           <Link
             href="/"
             className="flex items-center gap-3 group"
           >
+
             <div
               className="
                 w-11 h-11
@@ -42,6 +67,7 @@ export default function Header() {
                 group-hover:scale-105
               "
             >
+
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 className="h-6 w-6"
@@ -52,6 +78,7 @@ export default function Header() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
+
                 <rect
                   width="20"
                   height="14"
@@ -59,22 +86,32 @@ export default function Header() {
                   y="5"
                   rx="2"
                 />
+
                 <line
                   x1="2"
                   x2="22"
                   y1="10"
                   y2="10"
                 />
+
               </svg>
+
             </div>
+
 
             <span className="font-bold text-gray-900 text-xl tracking-tight">
               Card Scanner
             </span>
+
           </Link>
 
-          {/* Authentication Pages */}
+
+          {/* =====================================================
+              LOGIN / SIGNUP HEADER
+          ===================================================== */}
+
           {isAuthPage ? (
+
             <button
               type="button"
               onClick={() => router.back()}
@@ -89,12 +126,23 @@ export default function Header() {
                 transition-all duration-200
               "
             >
+
               <ArrowLeft className="w-4 h-4" />
+
               Back
+
             </button>
+
           ) : (
-            /* Normal App Navigation */
+
+            /* =====================================================
+                NORMAL APP NAVIGATION
+            ===================================================== */
+
             <nav className="flex items-center gap-2">
+
+
+              {/* Upload */}
 
               <Link
                 href="/"
@@ -103,6 +151,9 @@ export default function Header() {
                 Upload
               </Link>
 
+
+              {/* My Cards */}
+
               <Link
                 href="/cards"
                 className={navLinkClass("/cards")}
@@ -110,30 +161,57 @@ export default function Header() {
                 My Cards
               </Link>
 
-              <Link
-                href="/login"
-                className="
-                  px-3 py-2
-                  rounded-lg
-                  text-sm font-medium
-                  text-gray-600
-                  hover:text-primary-600
-                  hover:bg-gray-50
-                  transition-all duration-200
-                "
-              >
-                Login
-              </Link>
 
-              <div className="h-6 w-px bg-gray-200 mx-2" />
+              {/* =================================================
+                  LOGGED-IN USER
+              ================================================= */}
 
-              <LogoutButton />
+              {isLoggedIn ? (
+                <>
+
+                  {/* Profile */}
+
+                  <Link
+                    href="/profile"
+                    className={navLinkClass("/profile")}
+                  >
+                    Profile
+                  </Link>
+
+
+                  {/* Divider */}
+
+                  <div className="h-6 w-px bg-gray-200 mx-2" />
+
+
+                  {/* Logout */}
+
+                  <LogoutButton />
+
+                </>
+              ) : (
+
+                /* =================================================
+                    NOT LOGGED IN
+                ================================================= */
+
+                <Link
+                  href="/login"
+                  className={navLinkClass("/login")}
+                >
+                  Login
+                </Link>
+
+              )}
 
             </nav>
+
           )}
 
         </div>
+
       </div>
+
     </header>
   );
 }
