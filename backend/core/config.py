@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +9,10 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     supabase_url: str
     supabase_key: str
+
+    gemini_api_key: str
+    gemini_vlm_model: str = "gemini-3.6-flash"
+
     frontend_url: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(

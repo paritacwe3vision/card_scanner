@@ -37,27 +37,70 @@ interface LogoutResponse {
 async function handleResponse<T>(
   response: Response
 ): Promise<T> {
+
   const contentType = response.headers.get("content-type");
 
-  // Make sure backend returned JSON
+  // -----------------------------------------
+  // Backend did not return JSON
+  // -----------------------------------------
+
   if (!contentType?.includes("application/json")) {
+
     const text = await response.text();
 
-    console.error("Invalid backend response:", text);
+    console.error(
+      "Invalid backend response:",
+      text
+    );
 
     throw new Error(
-      "Backend returned an invalid response"
+      text || "Backend returned an invalid response"
     );
   }
 
   const data = await response.json();
 
+  // -----------------------------------------
+  // Backend returned an error
+  // -----------------------------------------
+
   if (!response.ok) {
-    throw new Error(
-      data.detail ||
-      data.message ||
-      "Something went wrong"
+
+    console.error(
+      "Backend error:",
+      data
     );
+
+    let errorMessage = "Something went wrong";
+
+    if (typeof data?.detail === "string") {
+
+      errorMessage = data.detail;
+
+    } else if (typeof data?.message === "string") {
+
+      errorMessage = data.message;
+
+    } else if (data?.detail) {
+
+      // detail is an object/array
+      errorMessage = JSON.stringify(
+        data.detail,
+        null,
+        2
+      );
+
+    } else if (data) {
+
+      // fallback for any other JSON response
+      errorMessage = JSON.stringify(
+        data,
+        null,
+        2
+      );
+    }
+
+    throw new Error(errorMessage);
   }
 
   return data;
@@ -128,14 +171,29 @@ export async function loginUser(
 // =====================================================
 
 
+// =====================================================
 // Upload from Camera / Image (Scan)
+// =====================================================
+
 export async function uploadScan(
-  file: File
-): Promise<ApiResponse<ExtractedCard>> {
+  frontFile: File,
+  backFile?: File | null
+): Promise<ApiResponse<any>> {
 
   const formData = new FormData();
 
-  formData.append("file", file);
+  // MUST match FastAPI parameter names
+  formData.append(
+    "front_file",
+    frontFile
+  );
+
+  if (backFile) {
+    formData.append(
+      "back_file",
+      backFile
+    );
+  }
 
   const response = await fetch(
     `${API_BASE}/api/cards/scan`,
@@ -145,12 +203,10 @@ export async function uploadScan(
     }
   );
 
-  return handleResponse<ApiResponse<ExtractedCard>>(
+  return handleResponse<ApiResponse<any>>(
     response
   );
 }
-
-
 // =====================================================
 // Upload PDF
 // =====================================================
