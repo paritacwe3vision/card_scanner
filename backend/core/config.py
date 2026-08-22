@@ -10,13 +10,13 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_key: str
 
-    openrouter_api_key: str
-    openrouter_vlm_model: str = "google/gemini-2.5-flash"
+    gemini_api_key: str
+    gemini_vlm_model: str = "gemini-3.5-flash-lite"
 
     frontend_url: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(
-        env_file=ROOT_DIR / ".env",
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
