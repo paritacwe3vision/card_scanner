@@ -157,11 +157,31 @@ async def scan_card(
 # PDF
 # ============================================================
 
+# ============================================================
+# PDF BUSINESS CARD SCAN
+# ============================================================
+
 @router.post("/pdf")
 async def process_card_pdf(
     file: UploadFile = File(...),
 ):
+    """
+    Process a business-card PDF.
+
+    PDF structure:
+
+        Page 1 -> Front
+        Page 2 -> Back
+
+    The extracted front/back images are then passed
+    through the same scanner pipeline used by image scanning.
+    """
+
     try:
+
+        # =====================================================
+        # READ PDF
+        # =====================================================
 
         file_bytes = await file.read()
 
@@ -171,31 +191,93 @@ async def process_card_pdf(
                 detail="PDF file is empty",
             )
 
-        card = process_pdf(
-            file_bytes
+        # =====================================================
+        # CONVERT PDF -> FRONT/BACK IMAGES
+        # =====================================================
+
+        pdf_data = process_pdf(
+            file_bytes=file_bytes,
         )
+
+        front_bytes = pdf_data.get(
+            "front_bytes"
+        )
+
+        back_bytes = pdf_data.get(
+            "back_bytes"
+        )
+
+        front_mime_type = pdf_data.get(
+            "front_mime_type",
+            "image/jpeg",
+        )
+
+        back_mime_type = pdf_data.get(
+            "back_mime_type",
+            "image/jpeg",
+        )
+
+        if not front_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract front page from PDF",
+            )
+
+        # =====================================================
+        # RUN NORMAL CARD SCANNER
+        # =====================================================
+
+        card = process_scan(
+            front_bytes=front_bytes,
+            back_bytes=back_bytes,
+            front_mime_type=front_mime_type,
+            back_mime_type=back_mime_type,
+        )
+
+        # =====================================================
+        # RESPONSE
+        # =====================================================
 
         return {
             "success": True,
-            "message": "PDF processed successfully",
+            "message": "Business card PDF scanned successfully",
             "card": card,
         }
 
     except HTTPException:
         raise
 
+    except RuntimeError as e:
+
+        print(
+            "PDF SCAN ERROR:",
+            repr(e),
+        )
+
+        error_message = str(e)
+
+        if "Gemini API quota exceeded" in error_message:
+            raise HTTPException(
+                status_code=503,
+                detail=error_message,
+            ) from e
+
+        raise HTTPException(
+            status_code=500,
+            detail=error_message,
+        ) from e
+
     except Exception as e:
 
         print(
-            "PDF ERROR:",
+            "PDF SCAN ERROR:",
             repr(e),
         )
 
         raise HTTPException(
             status_code=500,
             detail=str(e),
-        )
-
+        ) from e
 
 # ============================================================
 # URL

@@ -152,11 +152,11 @@ def login(data: LoginRequest):
 @router.post("/logout")
 def logout(data: LogoutRequest):
     try:
-        # 1. Find current user in login table
+        # Find the current user
         response = (
             supabase
             .table("login")
-            .select("*")
+            .select("id, email, full_name")
             .eq("id", data.user_id)
             .execute()
         )
@@ -164,44 +164,21 @@ def logout(data: LogoutRequest):
         if not response.data:
             raise HTTPException(
                 status_code=404,
-                detail="Logged-in user not found"
+                detail="User not found"
             )
 
         user = response.data[0]
 
-        # 2. Copy user to logout table
-        logout_response = (
-            supabase
-            .table("logout")
-            .upsert({
+        # Logout does NOT delete the account.
+        # The frontend will clear the logged-in session.
+        return {
+            "success": True,
+            "message": "Logout successful",
+            "user": {
                 "id": user.get("id"),
                 "email": user.get("email"),
                 "full_name": user.get("full_name"),
-                "password": user.get("password"),
-                "created_at": user.get("created_at"),
-                "updated_at": user.get("updated_at"),
-            })
-            .execute()
-        )
-
-        if not logout_response.data:
-            raise HTTPException(
-                status_code=500,
-                detail="Could not move user to logout table"
-            )
-
-        # 3. Delete user from login table
-        (
-            supabase
-            .table("login")
-            .delete()
-            .eq("id", data.user_id)
-            .execute()
-        )
-
-        return {
-            "success": True,
-            "message": "Logout successful"
+            }
         }
 
     except HTTPException:
