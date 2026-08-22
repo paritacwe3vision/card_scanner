@@ -315,7 +315,7 @@ export async function getCards():
 // =====================================================
 
 export async function deleteCard(
-  id: number
+  id: string
 ): Promise<ApiResponse<null>> {
 
   const response = await fetch(

@@ -383,7 +383,7 @@ async def get_business_cards():
 
 @router.delete("/{card_id}")
 async def remove_business_card(
-    card_id: int,
+    card_id: str,
 ):
 
     try:

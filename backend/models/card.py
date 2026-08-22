@@ -1,32 +1,34 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-
-# ============================================================
-# BUSINESS CARD CREATE MODEL
-# ============================================================
 
 class CardCreate(BaseModel):
     owner_name: str
-    company_name: str | None = None
-    address: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    gst_number: str | None = None
-    company_logo: str | None = None
-    instagram_url: str | None = None
-    website_url: str | None = None
-    facebook_url: str | None = None
-    linkedin_url: str | None = None
 
-# ============================================================
-# URL REQUEST MODEL
-# ============================================================
+    company_name: Optional[str] = None
+    designation: Optional[str] = None
+
+    address: Optional[str] = None
+
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+    gst_number: Optional[str] = None
+    company_logo: Optional[str] = None
+
+    instagram_url: Optional[str] = None
+    website_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+    other_details: Optional[str] = None
+
+    # Ignore extra frontend/scanner fields
+    model_config = ConfigDict(
+        extra="ignore"
+    )
+
 
 class UrlRequest(BaseModel):
-    """
-    Request model for URL-based card enrichment.
-    """
-
     url: str

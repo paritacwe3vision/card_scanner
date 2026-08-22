@@ -24,7 +24,7 @@ export default function CardReviewForm() {
 
   const [formData, setFormData] = useState<ExtractedCard>({
     owner_name: "",
-    job_title: "",
+    designation: "",
     company_name: "",
     address: "",
     email: "",
@@ -71,7 +71,7 @@ export default function CardReviewForm() {
 
       setFormData({
         owner_name: card.owner_name ?? "",
-        job_title: card.job_title ?? "",
+        designation: card.designation ?? "",
         company_name: card.company_name ?? "",
         address: card.address ?? "",
         email: card.email ?? "",
@@ -407,10 +407,10 @@ export default function CardReviewForm() {
           {/* DESIGNATION */}
 
           <Input
-            id="job_title"
-            name="job_title"
+            id="designation"
+            name="designation"
             label="Designation"
-            value={formData.job_title || ""}
+            value={formData.designation || ""}
             onChange={handleChange}
             placeholder="Founder & CEO"
           />

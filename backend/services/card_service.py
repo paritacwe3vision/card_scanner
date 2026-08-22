@@ -1,7 +1,12 @@
 from backend.core.supabase import supabase
 
+
 TABLE_NAME = "business_cards"
 
+
+# =====================================================
+# CREATE BUSINESS CARD
+# =====================================================
 
 def create_card(card_data: dict):
     response = (
@@ -17,6 +22,10 @@ def create_card(card_data: dict):
     return response.data[0]
 
 
+# =====================================================
+# GET ALL BUSINESS CARDS
+# =====================================================
+
 def get_all_cards():
     response = (
         supabase
@@ -29,7 +38,11 @@ def get_all_cards():
     return response.data or []
 
 
-def delete_card(card_id: int):
+# =====================================================
+# DELETE BUSINESS CARD
+# =====================================================
+
+def delete_card(card_id: str):
     response = (
         supabase
         .table(TABLE_NAME)

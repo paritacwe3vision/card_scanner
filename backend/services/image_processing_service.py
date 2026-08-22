@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional
 
 
 def bytes_to_image(file_bytes: bytes) -> np.ndarray:
@@ -401,3 +401,198 @@ def crop_card(
     )
 
     return image_to_bytes(warped)
+
+
+# ============================================================
+# CROP NORMALIZED REGION
+# ============================================================
+# ============================================================
+# CROP NORMALIZED REGION
+# ============================================================
+
+def crop_normalized_region(
+    file_bytes: bytes,
+    bbox: list[int],
+    padding: float = 0.05,
+) -> bytes:
+    """
+    Crop a region from an image using Gemini's
+    normalized bounding-box coordinates.
+
+    Expected format:
+
+    [ymin, xmin, ymax, xmax]
+
+    All coordinates are normalized from 0 to 1000.
+
+    This function is mainly used to crop the
+    company logo detected by the VLM.
+    """
+
+    # --------------------------------------------------------
+    # Validate image
+    # --------------------------------------------------------
+
+    if not file_bytes:
+        raise ValueError(
+            "Image bytes are empty"
+        )
+
+    # --------------------------------------------------------
+    # Validate bounding box
+    # --------------------------------------------------------
+
+    if not isinstance(bbox, list):
+        raise ValueError(
+            "Bounding box must be a list"
+        )
+
+    if len(bbox) != 4:
+        raise ValueError(
+            "Bounding box must contain exactly 4 values"
+        )
+
+    # --------------------------------------------------------
+    # Decode image
+    # --------------------------------------------------------
+
+    image = bytes_to_image(
+        file_bytes
+    )
+
+    image_height, image_width = image.shape[:2]
+
+    # --------------------------------------------------------
+    # Read Gemini coordinates
+    # --------------------------------------------------------
+
+    try:
+        ymin = int(bbox[0])
+        xmin = int(bbox[1])
+        ymax = int(bbox[2])
+        xmax = int(bbox[3])
+
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Bounding box coordinates must be integers"
+        ) from exc
+
+    # --------------------------------------------------------
+    # Clamp normalized values between 0 and 1000
+    # --------------------------------------------------------
+
+    ymin = max(
+        0,
+        min(1000, ymin),
+    )
+
+    xmin = max(
+        0,
+        min(1000, xmin),
+    )
+
+    ymax = max(
+        0,
+        min(1000, ymax),
+    )
+
+    xmax = max(
+        0,
+        min(1000, xmax),
+    )
+
+    # --------------------------------------------------------
+    # Validate rectangle
+    # --------------------------------------------------------
+
+    if ymax <= ymin:
+        raise ValueError(
+            "Invalid logo bounding box height"
+        )
+
+    if xmax <= xmin:
+        raise ValueError(
+            "Invalid logo bounding box width"
+        )
+
+    # --------------------------------------------------------
+    # Convert normalized coordinates to pixels
+    # --------------------------------------------------------
+
+    y1 = int(
+        (ymin / 1000.0)
+        * image_height
+    )
+
+    x1 = int(
+        (xmin / 1000.0)
+        * image_width
+    )
+
+    y2 = int(
+        (ymax / 1000.0)
+        * image_height
+    )
+
+    x2 = int(
+        (xmax / 1000.0)
+        * image_width
+    )
+
+    # --------------------------------------------------------
+    # Add padding around logo
+    # --------------------------------------------------------
+
+    crop_width = x2 - x1
+    crop_height = y2 - y1
+
+    padding_x = int(
+        crop_width * padding
+    )
+
+    padding_y = int(
+        crop_height * padding
+    )
+
+    x1 = max(
+        0,
+        x1 - padding_x,
+    )
+
+    y1 = max(
+        0,
+        y1 - padding_y,
+    )
+
+    x2 = min(
+        image_width,
+        x2 + padding_x,
+    )
+
+    y2 = min(
+        image_height,
+        y2 + padding_y,
+    )
+
+    # --------------------------------------------------------
+    # Crop logo
+    # --------------------------------------------------------
+
+    cropped = image[
+        y1:y2,
+        x1:x2,
+    ]
+
+    if cropped.size == 0:
+        raise ValueError(
+            "Logo crop resulted in an empty image"
+        )
+
+    # --------------------------------------------------------
+    # Return PNG bytes
+    # --------------------------------------------------------
+
+    return image_to_bytes(
+        cropped,
+        extension=".png",
+    )
