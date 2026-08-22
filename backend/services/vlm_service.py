@@ -1,11 +1,10 @@
+import base64
 import json
 import logging
 import time
 from typing import Any
 
-from google import genai
-from google.genai import errors
-from google.genai import types
+import requests
 
 from backend.core.config import settings
 
@@ -13,9 +12,7 @@ from backend.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-client = genai.Client(
-    api_key=settings.gemini_api_key
-)
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 VLM_PROMPT = """
@@ -74,12 +71,15 @@ EXPECTED_FIELDS = {
 
 def _clean_vlm_response(text: str) -> dict[str, Any]:
     """
-    Convert the VLM response into a Python dictionary.
+    Convert the OpenRouter VLM response into a Python dictionary.
     """
+
+    if not text:
+        raise ValueError("VLM returned an empty response")
 
     text = text.strip()
 
-    # Handle accidental markdown code fences.
+    # Remove accidental markdown code fences.
     if text.startswith("```"):
         lines = text.splitlines()
 
@@ -109,7 +109,7 @@ def _clean_vlm_response(text: str) -> dict[str, Any]:
             "VLM response must be a JSON object"
         )
 
-    # Keep only fields that belong to our schema.
+    # Keep only our expected fields.
     cleaned = {
         field: data.get(field)
         for field in EXPECTED_FIELDS
@@ -118,79 +118,220 @@ def _clean_vlm_response(text: str) -> dict[str, Any]:
     return cleaned
 
 
+def _image_to_data_url(
+    file_bytes: bytes,
+    mime_type: str,
+) -> str:
+    """
+    Convert image bytes into a base64 data URL.
+    """
+
+    encoded_image = base64.b64encode(
+        file_bytes
+    ).decode("utf-8")
+
+    return f"data:{mime_type};base64,{encoded_image}"
+
+
 def _generate_vlm_response(
     file_bytes: bytes,
     mime_type: str,
     max_retries: int = 3,
-):
+) -> str:
     """
-    Send the image to Gemini.
+    Send the business-card image to OpenRouter.
 
-    Handles:
-    - Temporary Gemini server errors
-    - Gemini quota/rate-limit errors
+    OpenRouter uses the Chat Completions API with a
+    vision-capable model.
     """
+
+    if not settings.openrouter_api_key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is not configured"
+        )
+
+    image_data_url = _image_to_data_url(
+        file_bytes=file_bytes,
+        mime_type=mime_type,
+    )
+
+    headers = {
+        "Authorization": (
+            f"Bearer {settings.openrouter_api_key}"
+        ),
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": settings.openrouter_vlm_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": VLM_PROMPT,
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_data_url,
+                        },
+                    },
+                ],
+            }
+        ],
+        "temperature": 0,
+    }
 
     for attempt in range(max_retries):
 
         try:
             logger.info(
-                "Sending business card to VLM "
+                "Sending business card to OpenRouter VLM "
+                "(attempt %s/%s, model=%s)",
+                attempt + 1,
+                max_retries,
+                settings.openrouter_vlm_model,
+            )
+
+            response = requests.post(
+                OPENROUTER_URL,
+                headers=headers,
+                json=payload,
+                timeout=120,
+            )
+
+            # -----------------------------------------
+            # SUCCESS
+            # -----------------------------------------
+
+            if response.status_code == 200:
+
+                response_data = response.json()
+
+                choices = response_data.get(
+                    "choices"
+                )
+
+                if not choices:
+                    raise RuntimeError(
+                        "OpenRouter returned no choices"
+                    )
+
+                message = choices[0].get(
+                    "message",
+                    {}
+                )
+
+                content = message.get(
+                    "content"
+                )
+
+                if not content:
+                    raise RuntimeError(
+                        "OpenRouter returned empty VLM content"
+                    )
+
+                return content
+
+            # -----------------------------------------
+            # RATE LIMIT
+            # -----------------------------------------
+
+            if response.status_code == 429:
+
+                logger.warning(
+                    "OpenRouter rate limit reached: %s",
+                    response.text,
+                )
+
+                if attempt == max_retries - 1:
+                    raise RuntimeError(
+                        "OpenRouter API rate limit exceeded. "
+                        "Please try again later."
+                    )
+
+                wait_seconds = 2 ** attempt
+
+                time.sleep(
+                    wait_seconds
+                )
+
+                continue
+
+            # -----------------------------------------
+            # SERVER ERROR
+            # -----------------------------------------
+
+            if response.status_code >= 500:
+
+                logger.warning(
+                    "OpenRouter server error "
+                    "(attempt %s/%s): %s",
+                    attempt + 1,
+                    max_retries,
+                    response.text,
+                )
+
+                if attempt == max_retries - 1:
+                    raise RuntimeError(
+                        "OpenRouter VLM service is temporarily unavailable."
+                    )
+
+                wait_seconds = 2 ** attempt
+
+                time.sleep(
+                    wait_seconds
+                )
+
+                continue
+
+            # -----------------------------------------
+            # OTHER API ERROR
+            # -----------------------------------------
+
+            try:
+                error_data = response.json()
+            except ValueError:
+                error_data = response.text
+
+            logger.error(
+                "OpenRouter API error: %s",
+                error_data,
+            )
+
+            raise RuntimeError(
+                f"OpenRouter API request failed "
+                f"(HTTP {response.status_code}): "
+                f"{error_data}"
+            )
+
+        except requests.Timeout as exc:
+
+            logger.warning(
+                "OpenRouter request timed out "
                 "(attempt %s/%s)",
                 attempt + 1,
                 max_retries,
             )
 
-            response = client.models.generate_content(
-                model=settings.gemini_vlm_model,
-                contents=[
-                    types.Part.from_bytes(
-                        data=file_bytes,
-                        mime_type=mime_type,
-                    ),
-                    VLM_PROMPT,
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
-            )
-
-            return response
-
-        # -----------------------------------------
-        # QUOTA / RATE LIMIT
-        # -----------------------------------------
-
-        except errors.ClientError as exc:
-
-            if exc.code == 429:
-                logger.error(
-                    "Gemini API quota exceeded: %s",
-                    exc,
-                )
-
+            if attempt == max_retries - 1:
                 raise RuntimeError(
-                    "Gemini API quota exceeded. "
-                    "Please wait for the quota to reset "
-                    "or use a Gemini API project with available quota."
+                    "OpenRouter VLM request timed out."
                 ) from exc
 
-            logger.exception(
-                "Gemini API client error"
+            wait_seconds = 2 ** attempt
+
+            time.sleep(
+                wait_seconds
             )
 
-            raise RuntimeError(
-                f"Gemini API request failed: {exc}"
-            ) from exc
-
-        # -----------------------------------------
-        # TEMPORARY SERVER ERROR
-        # -----------------------------------------
-
-        except errors.ServerError as exc:
+        except requests.RequestException as exc:
 
             logger.warning(
-                "Gemini server error on attempt %s/%s: %s",
+                "OpenRouter connection error "
+                "(attempt %s/%s): %s",
                 attempt + 1,
                 max_retries,
                 exc,
@@ -198,21 +339,17 @@ def _generate_vlm_response(
 
             if attempt == max_retries - 1:
                 raise RuntimeError(
-                    "VLM service is temporarily unavailable. "
-                    "Please try again later."
+                    "Could not connect to OpenRouter."
                 ) from exc
 
             wait_seconds = 2 ** attempt
 
-            logger.info(
-                "Retrying VLM request in %s seconds...",
-                wait_seconds,
+            time.sleep(
+                wait_seconds
             )
 
-            time.sleep(wait_seconds)
-
     raise RuntimeError(
-        "VLM request failed after all retries"
+        "OpenRouter VLM request failed after all retries"
     )
 
 
@@ -221,17 +358,7 @@ def extract_business_card(
     mime_type: str,
 ) -> dict[str, Any]:
     """
-    Send a business-card image directly to the VLM.
-
-    Args:
-        file_bytes:
-            Raw image bytes.
-
-        mime_type:
-            Image MIME type, e.g. image/jpeg.
-
-    Returns:
-        Structured business-card information.
+    Extract business-card information using OpenRouter VLM.
     """
 
     if not file_bytes:
@@ -244,12 +371,31 @@ def extract_business_card(
             f"Unsupported MIME type: {mime_type}"
         )
 
-    response = _generate_vlm_response(
-        file_bytes=file_bytes,
-        mime_type=mime_type,
-        max_retries=3,
-    )
+    try:
 
-    return _clean_vlm_response(
-        response.text
-    )
+        response_text = _generate_vlm_response(
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            max_retries=3,
+        )
+
+        return _clean_vlm_response(
+            response_text
+        )
+
+    except RuntimeError:
+        raise
+
+    except ValueError:
+        raise
+
+    except Exception as exc:
+
+        logger.exception(
+            "Unexpected OpenRouter VLM error"
+        )
+
+        raise RuntimeError(
+            f"VLM extraction failed: {exc}"
+        ) from exc
+
