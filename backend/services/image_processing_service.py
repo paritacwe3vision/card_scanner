@@ -149,76 +149,95 @@ def preprocess_image(
         extension=".jpg",
     )
 
+def detect_qr_code(file_bytes: bytes) -> Optional[str]:
+    results = detect_qr_codes(file_bytes)
+    return results[0] if results else None
 
-def detect_qr_code(
-    file_bytes: bytes,
-) -> Optional[str]:
-    """
-    Detect and decode a QR code from a business-card image.
 
-    Returns:
-        QR content if detected.
-        None if no QR code is found.
+def detect_qr_codes(file_bytes: bytes) -> list[str]:
     """
+    Aggressive multi-strategy QR detection for real business cards.
+    """
+    if not file_bytes:
+        return []
 
     image = bytes_to_image(file_bytes)
-
     detector = cv2.QRCodeDetector()
+    found: list[str] = []
 
-    try:
-        data, points, _ = detector.detectAndDecode(image)
+    def _add(value: str | None):
+        if value and value.strip() and value.strip() not in found:
+            found.append(value.strip())
 
-        if data:
-            return data.strip()
+    def _try(img: np.ndarray):
+        # Multi
+        try:
+            success, decoded_info, _, _ = detector.detectAndDecodeMulti(img)
+            if success and decoded_info:
+                for v in decoded_info:
+                    _add(v)
+        except Exception:
+            pass
 
-    except Exception:
-        pass
+        # Single
+        try:
+            data, _, _ = detector.detectAndDecode(img)
+            _add(data)
+        except Exception:
+            pass
 
-    return None
+    # 1. Original
+    _try(image)
+    if found:
+        return found
 
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-def detect_qr_codes(
-    file_bytes: bytes,
-) -> list[str]:
-    """
-    Detect multiple QR codes when supported by the
-    installed OpenCV version.
-    """
+    # 2. CLAHE
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    _try(clahe.apply(gray))
+    if found:
+        return found
 
-    image = bytes_to_image(file_bytes)
+    # 3. Adaptive threshold variants
+    for block in (31, 51, 71):
+        for c in (5, 10, 15):
+            adaptive = cv2.adaptiveThreshold(
+                gray, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                block, c
+            )
+            _try(adaptive)
+            if found:
+                return found
 
-    detector = cv2.QRCodeDetector()
+    # 4. Otsu
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _try(otsu)
+    if found:
+        return found
 
-    results: list[str] = []
+    # 5. Upscale (helps small QRs)
+    h, w = gray.shape[:2]
+    if max(h, w) < 1600:
+        for scale in (1.5, 2.0, 2.5):
+            up = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            _try(up)
+            _try(clahe.apply(up))
+            if found:
+                return found
 
-    try:
-        success, decoded_info, points, _ = (
-            detector.detectAndDecodeMulti(image)
-        )
+    # 6. Slight rotations (common on phone photos)
+    for angle in (-8, -4, 4, 8):
+        matrix = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+        rotated = cv2.warpAffine(gray, matrix, (w, h), flags=cv2.INTER_LINEAR)
+        _try(rotated)
+        if found:
+            return found
 
-        if success and decoded_info:
-
-            for value in decoded_info:
-
-                if value and value.strip():
-
-                    results.append(
-                        value.strip()
-                    )
-
-    except Exception:
-        pass
-
-    # Fallback to single QR detection
-    if not results:
-
-        single = detect_qr_code(file_bytes)
-
-        if single:
-            results.append(single)
-
-    return results
-
+    return found
 
 def resize_image(
     file_bytes: bytes,

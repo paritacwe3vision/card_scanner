@@ -157,6 +157,7 @@ EXPECTED_FIELDS = {
     "facebook_url",
     "linkedin_url",
     "logo_bbox",
+    "qr_content",
 }
 # ============================================================
 # CLEAN LOGO BOUNDING BOX
@@ -527,3 +528,66 @@ def extract_business_card(
     return _clean_vlm_response(
         response_text
     )
+
+#QR code detection
+VLM_PROMPT = """
+You are a business-card information extraction system.
+
+Analyze the provided business-card image and extract only information
+that is actually visible or clearly readable.
+
+Do NOT invent, guess, or hallucinate missing information.
+
+Also inspect the ENTIRE business-card image for the company or brand logo
+and any QR codes.
+
+Return ONLY valid JSON using exactly this structure:
+
+{
+    "owner_name": null,
+    "designation": null,
+    "company_name": null,
+    "address": null,
+    "email": null,
+    "phone": null,
+    "gst_number": null,
+    "website_url": null,
+    "instagram_url": null,
+    "facebook_url": null,
+    "linkedin_url": null,
+    "logo_bbox": null,
+    "qr_content": null
+}
+
+
+LOGO DETECTION RULES:
+
+1. Search the ENTIRE image for the company or brand logo.
+2. Do NOT assume the logo is located in a specific place.
+3. The logo may appear anywhere on the card.
+4. A company logo may be a graphical symbol, brand icon, stylized initials,
+   or a styled company wordmark.
+5. Do NOT identify QR codes, icons, decorative shapes, or profile photos as the logo.
+6. If a clear company logo is visible, return its bounding box as:
+   "logo_bbox": [ymin, xmin, ymax, xmax]
+   (normalized integers from 0 to 1000)
+7. If no clear logo exists, return "logo_bbox": null.
+
+
+QR CODE RULES:
+
+1. Look carefully for any QR code on the card (front or back style).
+2. If a QR code is clearly visible, try to read / decode its content.
+3. Return the decoded text/URL in "qr_content".
+4. If you can see a QR code but cannot reliably decode it, still return null.
+5. Do NOT invent QR content. Only return real readable content.
+6. If no QR code exists, return "qr_content": null.
+
+
+GENERAL EXTRACTION RULES:
+
+1. If a field is not visible, return null.
+2. Preserve names, phone numbers, emails, websites exactly as written.
+3. Do not create information that is not present.
+4. Return JSON only.
+"""

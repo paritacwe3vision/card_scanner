@@ -26,6 +26,7 @@ export interface BusinessCard {
   linkedin_url: string | null;
 
   other_details: string | null;
+  qr_raw: string | null;
 
   created_at: string;
   updated_at: string;

@@ -20,6 +20,7 @@ from backend.core.supabase import (
 # SAFE IMAGE EXTRACTION
 # ============================================================
 
+#function changed by drashti
 def _safe_extract(
     image_bytes: bytes,
     mime_type: str,
@@ -30,10 +31,10 @@ def _safe_extract(
     Flow:
     1. Crop the business card from the uploaded image.
     2. Preprocess the card.
-    3. Detect QR codes.
+    3. Detect QR codes (OpenCV).
     4. Send the card to Gemini.
-    5. If Gemini returns a logo bounding box,
-       crop the logo from the card.
+    5. Crop logo if Gemini found a bounding box.
+    6. Merge QR results (OpenCV first, Gemini fallback).
     """
 
     if not image_bytes:
@@ -47,13 +48,11 @@ def _safe_extract(
         card_bytes = crop_card(
             file_bytes=image_bytes,
         )
-
     except Exception as exc:
         print(
             "Card crop failed, using original image:",
             exc,
         )
-
         # Never break normal scanning
         card_bytes = image_bytes
 
@@ -64,26 +63,23 @@ def _safe_extract(
     processed_bytes = preprocess_image(
         file_bytes=card_bytes,
     )
-
     # preprocess_image() always returns JPEG
     processed_mime_type = "image/jpeg"
 
     # ========================================================
-    # 3. QR DETECTION
+    # 3. QR DETECTION (OpenCV first)
     # ========================================================
 
-    qr_codes = detect_qr_codes(
-        card_bytes
-    )
+    qr_codes = detect_qr_codes(card_bytes)
 
     # ========================================================
     # 4. GEMINI VLM EXTRACTION
     # ========================================================
 
     extracted = extract_business_card(
-    file_bytes=card_bytes,
-    mime_type="image/jpeg",
-)
+        file_bytes=card_bytes,
+        mime_type="image/jpeg",
+    )
 
     # ========================================================
     # 5. LOGO EXTRACTION
@@ -91,70 +87,46 @@ def _safe_extract(
 
     logo_bytes: bytes | None = None
 
-    # New Gemini format:
-    #
-    # [ymin, xmin, ymax, xmax]
-    #
-    logo_bbox = extracted.get(
-        "logo_bbox"
-    )
+    logo_bbox = extracted.get("logo_bbox")
 
     if logo_bbox:
-
         try:
-
-            # IMPORTANT:
-            #
-            # Gemini analyzed processed_bytes, which came
-            # from card_bytes.
-            #
-            # Because coordinates are normalized 0-1000,
-            # we can safely crop from card_bytes.
-
+            # Gemini analyzed the card image.
+            # Coordinates are normalized 0-1000, so we can
+            # safely crop from card_bytes.
             logo_bytes = crop_normalized_region(
                 file_bytes=card_bytes,
                 bbox=logo_bbox,
             )
-
         except Exception as exc:
-
-            print(
-                "Logo crop failed:",
-                exc,
-            )
-
+            print("Logo crop failed:", exc)
             logo_bytes = None
 
-    else:
-
-    # Keep raw logo bytes internally.
-    # Do not return binary bytes directly through JSON.
-
-        extracted["_company_logo_bytes"] = (
-            logo_bytes
-        )
+    # Always attach the logo bytes (or None)
+    extracted["_company_logo_bytes"] = logo_bytes
 
     # ========================================================
-    # QR INFORMATION
+    # 6. QR INFORMATION  (OpenCV + Gemini fallback)
     # ========================================================
 
+    # Prefer OpenCV results
     if qr_codes:
-
-        extracted["qr_raw"] = (
-            qr_codes[0]
-        )
-
-        extracted["qr_codes"] = (
-            qr_codes
-        )
-
+        extracted["qr_raw"] = qr_codes[0]
+        extracted["qr_codes"] = qr_codes
     else:
+        # Fallback to Gemini's reading of the QR
+        gemini_qr = extracted.get("qr_content")
+        if gemini_qr and isinstance(gemini_qr, str) and gemini_qr.strip():
+            extracted["qr_raw"] = gemini_qr.strip()
+            extracted["qr_codes"] = [gemini_qr.strip()]
+        else:
+            extracted["qr_raw"] = None
+            extracted["qr_codes"] = []
 
-        extracted["qr_raw"] = None
-        extracted["qr_codes"] = []
+    # Clean up internal field so it doesn't go to the frontend
+    extracted.pop("qr_content", None)
 
     return extracted
-
 
 # ============================================================
 # MERGE FRONT + BACK

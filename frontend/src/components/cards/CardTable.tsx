@@ -13,6 +13,7 @@ import {
   Globe,
   ExternalLink,
   FileText,
+  QrCode,               // ← add this
 } from "lucide-react";
 
 import { BusinessCard } from "@/types/card";
@@ -561,6 +562,40 @@ export default function CardTable() {
                 />
 
               </div>
+              {/* ================= QR CODE ================= */}
+
+                {selectedCard.qr_raw && (
+                  <div className="mt-7">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-4">
+                      QR Code
+                    </h3>
+
+                    <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+                      <div className="flex items-center gap-2 text-xs font-medium text-green-700 mb-2">
+                        <QrCode className="h-4 w-4" />
+                        <span>QR Code Data</span>
+                      </div>
+
+                      {/* Make it clickable if it's a URL */}
+                      {selectedCard.qr_raw.startsWith("http://") ||
+                      selectedCard.qr_raw.startsWith("https://") ? (
+                        <a
+                          href={selectedCard.qr_raw}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium text-green-800 hover:underline break-all flex items-center gap-1.5"
+                        >
+                          {selectedCard.qr_raw}
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        </a>
+                      ) : (
+                        <p className="text-sm font-medium text-green-800 break-all">
+                          {selectedCard.qr_raw}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
 
               {/* ================= DATES ================= */}
 

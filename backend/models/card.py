@@ -1,5 +1,4 @@
 from typing import Optional
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -24,7 +23,8 @@ class CardCreate(BaseModel):
 
     other_details: Optional[str] = None
 
-    # Ignore extra frontend/scanner fields
+    qr_raw: Optional[str] = None          # ← important
+
     model_config = ConfigDict(
         extra="ignore"
     )
