@@ -82,3 +82,17 @@ export interface ApiResponse<T> {
   data?: T;
   card?: T;
 }
+
+export interface QrDetail {
+  raw: string;
+  type: "instagram" | "whatsapp" | "phone" | "email" | "location" | "website" | "other";
+  label: string;
+  url: string | null;
+}
+
+export interface ExtractedCard {
+  // ... existing fields
+  qr_raw?: string | null;
+  qr_codes?: string[] | null;
+  qr_details?: QrDetail[] | null;
+}

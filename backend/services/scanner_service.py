@@ -5,6 +5,7 @@ from backend.services.image_processing_service import (
     detect_qr_codes,
     crop_card,
     crop_normalized_region,
+    categorize_qr,               # ← add this
 )
 
 from backend.services.vlm_service import (
@@ -25,114 +26,69 @@ def _safe_extract(
     image_bytes: bytes,
     mime_type: str,
 ) -> dict[str, Any]:
-    """
-    Process one side of a business card.
-
-    Flow:
-    1. Crop the business card from the uploaded image.
-    2. Preprocess the card.
-    3. Detect QR codes (OpenCV).
-    4. Send the card to Gemini.
-    5. Crop logo if Gemini found a bounding box.
-    6. Merge QR results (OpenCV first, Gemini fallback).
-    """
-
     if not image_bytes:
         return {}
 
-    # ========================================================
-    # 1. CROP BUSINESS CARD
-    # ========================================================
-
+    # 1. Crop card
     try:
-        card_bytes = crop_card(
-            file_bytes=image_bytes,
-        )
+        card_bytes = crop_card(file_bytes=image_bytes)
     except Exception as exc:
-        print(
-            "Card crop failed, using original image:",
-            exc,
-        )
-        # Never break normal scanning
+        print("Card crop failed, using original image:", exc)
         card_bytes = image_bytes
 
-    # ========================================================
-    # 2. PREPROCESS CARD
-    # ========================================================
+    # 2. QR Detection (OpenCV + pyzbar)
+    opencv_qrs = detect_qr_codes(card_bytes)
 
-    processed_bytes = preprocess_image(
-        file_bytes=card_bytes,
-    )
-    # preprocess_image() always returns JPEG
-    processed_mime_type = "image/jpeg"
+    # Also try original image
+    if not opencv_qrs:
+        opencv_qrs = detect_qr_codes(image_bytes)
 
-    # ========================================================
-    # 3. QR DETECTION (OpenCV first)
-    # ========================================================
-
-    qr_codes = detect_qr_codes(card_bytes)
-
-    # ========================================================
-    # 4. GEMINI VLM EXTRACTION
-    # ========================================================
-
+    # 3. Gemini VLM
     extracted = extract_business_card(
         file_bytes=card_bytes,
         mime_type="image/jpeg",
     )
 
-    # ========================================================
-    # 5. LOGO EXTRACTION
-    # ========================================================
-
-    logo_bytes: bytes | None = None
-
+    # 4. Logo
+    logo_bytes = None
     logo_bbox = extracted.get("logo_bbox")
-
     if logo_bbox:
         try:
-            # Gemini analyzed the card image.
-            # Coordinates are normalized 0-1000, so we can
-            # safely crop from card_bytes.
             logo_bytes = crop_normalized_region(
                 file_bytes=card_bytes,
                 bbox=logo_bbox,
             )
         except Exception as exc:
             print("Logo crop failed:", exc)
-            logo_bytes = None
 
-    # Always attach the logo bytes (or None)
     extracted["_company_logo_bytes"] = logo_bytes
 
-    # ========================================================
-    # 6. QR INFORMATION  (OpenCV + Gemini, keep ALL)
-    # ========================================================
+    # 5. Merge QR codes (OpenCV/pyzbar + Gemini)
+    all_raw_qrs: list[str] = []
 
-    all_qr_codes: list[str] = []
+    for code in opencv_qrs:
+        if code and code.strip() and code.strip() not in all_raw_qrs:
+            all_raw_qrs.append(code.strip())
 
-    # From OpenCV
-    if qr_codes:
-        for code in qr_codes:
-            if code and code.strip() and code.strip() not in all_qr_codes:
-                all_qr_codes.append(code.strip())
-
-    # From Gemini fallback
+    # Gemini fallback / extra
     gemini_qr = extracted.get("qr_content")
     if gemini_qr and isinstance(gemini_qr, str) and gemini_qr.strip():
         value = gemini_qr.strip()
-        if value not in all_qr_codes:
-            all_qr_codes.append(value)
+        if value not in all_raw_qrs:
+            all_raw_qrs.append(value)
 
-    # Final result
-    if all_qr_codes:
-        extracted["qr_raw"] = all_qr_codes[0]          # first one (for compatibility)
-        extracted["qr_codes"] = all_qr_codes           # ALL codes
+    # 6. Categorize every QR
+    qr_details = [categorize_qr(qr) for qr in all_raw_qrs]
+
+    if qr_details:
+        extracted["qr_raw"] = qr_details[0]["raw"]
+        extracted["qr_codes"] = [item["raw"] for item in qr_details]
+        extracted["qr_details"] = qr_details          # ← rich info
     else:
         extracted["qr_raw"] = None
         extracted["qr_codes"] = []
+        extracted["qr_details"] = []
 
-    # Clean up internal field
     extracted.pop("qr_content", None)
 
     return extracted

@@ -573,15 +573,27 @@ LOGO DETECTION RULES:
    (normalized integers from 0 to 1000)
 7. If no clear logo exists, return "logo_bbox": null.
 
+QR CODE RULES (VERY IMPORTANT):
 
-QR CODE RULES:
-
-1. Look carefully for any QR code on the card (front or back style).
-2. If a QR code is clearly visible, try to read / decode its content.
-3. Return the decoded text/URL in "qr_content".
-4. If you can see a QR code but cannot reliably decode it, still return null.
-5. Do NOT invent QR content. Only return real readable content.
-6. If no QR code exists, return "qr_content": null.
+1. Carefully examine the entire business card image for any QR codes.
+2. Business cards very often contain Instagram QR codes (especially on the back side).
+3. Instagram QR codes do **not** always have the Instagram logo in the center.
+   Some look like normal black-and-white QR codes.
+4. You must try hard to read every QR code you see.
+5. Typical Instagram QR content looks like:
+   - https://www.instagram.com/username
+   - https://instagram.com/username
+   - or any link that opens an Instagram profile
+6. Also read other common QR contents such as:
+   - Website URLs
+   - WhatsApp links (wa.me / api.whatsapp.com)
+   - Phone numbers
+   - Email addresses
+7. Return the decoded content in "qr_content".
+8. If multiple QR codes exist, prefer the Instagram link if one is present.
+9. Never invent or guess the content. Only return what you can actually read.
+10. If you can see a QR code but cannot reliably decode it, return null.
+11. If no QR code is present, return "qr_content": null.
 
 
 GENERAL EXTRACTION RULES:

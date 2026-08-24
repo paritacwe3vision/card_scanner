@@ -10,3 +10,4 @@ beautifulsoup4
 pypdf
 Pillow
 google-genai
+pyzbar

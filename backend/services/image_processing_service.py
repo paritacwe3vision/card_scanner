@@ -156,7 +156,7 @@ def detect_qr_code(file_bytes: bytes) -> Optional[str]:
 
 def detect_qr_codes(file_bytes: bytes) -> list[str]:
     """
-    Aggressive multi-strategy QR detection for real business cards.
+    High-accuracy multi-strategy QR detection for business cards.
     """
     if not file_bytes:
         return []
@@ -166,11 +166,13 @@ def detect_qr_codes(file_bytes: bytes) -> list[str]:
     found: list[str] = []
 
     def _add(value: str | None):
-        if value and value.strip() and value.strip() not in found:
-            found.append(value.strip())
+        if value and isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned and cleaned not in found:
+                found.append(cleaned)
 
     def _try(img: np.ndarray):
-        # Multi
+        # Multi QR
         try:
             success, decoded_info, _, _ = detector.detectAndDecodeMulti(img)
             if success and decoded_info:
@@ -179,29 +181,36 @@ def detect_qr_codes(file_bytes: bytes) -> list[str]:
         except Exception:
             pass
 
-        # Single
+        # Single QR
         try:
             data, _, _ = detector.detectAndDecode(img)
             _add(data)
         except Exception:
             pass
 
-    # 1. Original
+    # --------------------------------------------------------
+    # 1. Original color image
+    # --------------------------------------------------------
     _try(image)
     if found:
         return found
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # 2. CLAHE
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    _try(clahe.apply(gray))
+    # --------------------------------------------------------
+    # 2. Strong CLAHE
+    # --------------------------------------------------------
+    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    _try(enhanced)
     if found:
         return found
 
-    # 3. Adaptive threshold variants
-    for block in (31, 51, 71):
-        for c in (5, 10, 15):
+    # --------------------------------------------------------
+    # 3. Multiple adaptive thresholds
+    # --------------------------------------------------------
+    for block in (21, 31, 41, 51, 71):
+        for c in (3, 5, 7, 10, 15):
             adaptive = cv2.adaptiveThreshold(
                 gray, 255,
                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -212,30 +221,51 @@ def detect_qr_codes(file_bytes: bytes) -> list[str]:
             if found:
                 return found
 
-    # 4. Otsu
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _try(otsu)
-    if found:
-        return found
-
-    # 5. Upscale (helps small QRs)
-    h, w = gray.shape[:2]
-    if max(h, w) < 1600:
-        for scale in (1.5, 2.0, 2.5):
-            up = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-            _try(up)
-            _try(clahe.apply(up))
+            # Also try inverted
+            _try(cv2.bitwise_not(adaptive))
             if found:
                 return found
 
-    # 6. Slight rotations (common on phone photos)
-    for angle in (-8, -4, 4, 8):
-        matrix = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
-        rotated = cv2.warpAffine(gray, matrix, (w, h), flags=cv2.INTER_LINEAR)
-        _try(rotated)
+    # --------------------------------------------------------
+    # 4. Otsu + variants
+    # --------------------------------------------------------
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _try(otsu)
+    _try(cv2.bitwise_not(otsu))
+    if found:
+        return found
+
+    # --------------------------------------------------------
+    # 5. Upscale (very important for small QRs)
+    # --------------------------------------------------------
+    h, w = gray.shape[:2]
+    for scale in (1.5, 2.0, 2.5, 3.0):
+        up = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        _try(up)
+        _try(clahe.apply(up))
         if found:
             return found
+
+    # --------------------------------------------------------
+    # 6. Slight rotations (phone photos are rarely straight)
+    # --------------------------------------------------------
+    center = (w // 2, h // 2)
+    for angle in (-12, -8, -5, -3, 3, 5, 8, 12):
+        matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+        rotated = cv2.warpAffine(gray, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        _try(rotated)
+        _try(clahe.apply(rotated))
+        if found:
+            return found
+
+    # --------------------------------------------------------
+    # 7. Sharpen + detect again
+    # --------------------------------------------------------
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+    sharpened = cv2.filter2D(gray, -1, kernel)
+    _try(sharpened)
+    _try(clahe.apply(sharpened))
 
     return found
 
@@ -615,3 +645,105 @@ def crop_normalized_region(
         cropped,
         extension=".png",
     )
+
+def categorize_qr(content: str) -> dict:
+    """
+    Categorize a decoded QR code content.
+    """
+    if not content:
+        return {
+            "raw": content,
+            "type": "other",
+            "label": "Other",
+            "url": None
+        }
+
+    raw = content.strip()
+    lower = raw.lower()
+
+    # Instagram
+    if (
+        "instagram.com" in lower
+        or lower.startswith("instagram://")
+        or (lower.startswith("@") and len(lower) < 35)
+    ):
+        username = raw
+        if "instagram.com/" in lower:
+            username = raw.split("instagram.com/")[-1].split("?")[0].strip("/")
+        elif lower.startswith("@"):
+            username = raw[1:]
+        
+        url = f"https://www.instagram.com/{username}"
+        return {
+            "raw": raw,
+            "type": "instagram",
+            "label": "Instagram",
+            "url": url
+        }
+
+    # WhatsApp
+    if (
+        "wa.me" in lower
+        or "whatsapp" in lower
+        or lower.startswith("whatsapp://")
+    ):
+        return {
+            "raw": raw,
+            "type": "whatsapp",
+            "label": "WhatsApp",
+            "url": raw if raw.startswith("http") else f"https://{raw}"
+        }
+
+    # Phone
+    if lower.startswith("tel:") or (
+        lower.replace("+", "").replace(" ", "").replace("-", "").isdigit()
+        and len(lower.replace(" ", "")) >= 8
+    ):
+        phone = raw.replace("tel:", "").strip()
+        return {
+            "raw": raw,
+            "type": "phone",
+            "label": "Phone",
+            "url": f"tel:{phone}"
+        }
+
+    # Email
+    if lower.startswith("mailto:") or ("@" in lower and "." in lower):
+        email = raw.replace("mailto:", "").strip()
+        return {
+            "raw": raw,
+            "type": "email",
+            "label": "Email",
+            "url": f"mailto:{email}"
+        }
+
+    # Location / Maps
+    if (
+        "maps.google" in lower
+        or "goo.gl/maps" in lower
+        or lower.startswith("geo:")
+        or "maps.app.goo.gl" in lower
+    ):
+        return {
+            "raw": raw,
+            "type": "location",
+            "label": "Location",
+            "url": raw if raw.startswith("http") else f"https://{raw}"
+        }
+
+    # Website
+    if lower.startswith("http://") or lower.startswith("https://"):
+        return {
+            "raw": raw,
+            "type": "website",
+            "label": "Website",
+            "url": raw
+        }
+
+    # Fallback
+    return {
+        "raw": raw,
+        "type": "other",
+        "label": "Other",
+        "url": None
+    }
