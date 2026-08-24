@@ -26,6 +26,7 @@ from backend.services.pdf_service import (
 
 from backend.services.enrichment_service import (
     process_url,
+    enrich_business_card,
 )
 
 
@@ -33,6 +34,39 @@ router = APIRouter(
     prefix="/api/cards",
     tags=["Business Cards"],
 )
+
+
+# ============================================================
+# SAFE WEBSITE ENRICHMENT
+# ============================================================
+
+async def _safe_enrich_card(
+    card: dict,
+) -> dict:
+    """
+    Try to enrich missing business-card information
+    from the official website.
+
+    If enrichment fails, return the original scanned
+    card so normal scanning is never interrupted.
+    """
+
+    try:
+
+        enriched_card = await enrich_business_card(
+            card
+        )
+
+        return enriched_card
+
+    except Exception as e:
+
+        print(
+            "ENRICHMENT ERROR:",
+            repr(e),
+        )
+
+        return card
 
 
 # ============================================================
@@ -47,17 +81,14 @@ async def scan_card(
     """
     Scan a business card using front and optional back images.
 
-    Front:
-        Main business-card information.
+    Flow:
 
-    Back:
-        Additional information such as:
-        - phone
-        - address
-        - website
-        - social links
-        - QR codes
-        - GST
+    1. Read front/back images
+    2. Extract visible card information
+    3. Detect QR codes
+    4. Detect/crop company logo
+    5. Upload company logo
+    6. Enrich missing information from official website
     """
 
     try:
@@ -84,6 +115,7 @@ async def scan_card(
         # =====================================================
 
         back_bytes = None
+
         back_mime_type = "image/jpeg"
 
         if back_file is not None:
@@ -91,6 +123,7 @@ async def scan_card(
             temp_back_bytes = await back_file.read()
 
             if temp_back_bytes:
+
                 back_bytes = temp_back_bytes
 
                 back_mime_type = (
@@ -107,6 +140,14 @@ async def scan_card(
             back_bytes=back_bytes,
             front_mime_type=front_mime_type,
             back_mime_type=back_mime_type,
+        )
+
+        # =====================================================
+        # WEBSITE ENRICHMENT
+        # =====================================================
+
+        card = await _safe_enrich_card(
+            card
         )
 
         # =====================================================
@@ -132,6 +173,7 @@ async def scan_card(
         error_message = str(e)
 
         if "Gemini API quota exceeded" in error_message:
+
             raise HTTPException(
                 status_code=503,
                 detail=error_message,
@@ -153,9 +195,7 @@ async def scan_card(
             status_code=500,
             detail=str(e),
         ) from e
-# ============================================================
-# PDF
-# ============================================================
+
 
 # ============================================================
 # PDF BUSINESS CARD SCAN
@@ -173,8 +213,8 @@ async def process_card_pdf(
         Page 1 -> Front
         Page 2 -> Back
 
-    The extracted front/back images are then passed
-    through the same scanner pipeline used by image scanning.
+    The extracted front/back images are passed through
+    the normal scanner and then website enrichment.
     """
 
     try:
@@ -186,6 +226,7 @@ async def process_card_pdf(
         file_bytes = await file.read()
 
         if not file_bytes:
+
             raise HTTPException(
                 status_code=400,
                 detail="PDF file is empty",
@@ -218,6 +259,7 @@ async def process_card_pdf(
         )
 
         if not front_bytes:
+
             raise HTTPException(
                 status_code=400,
                 detail="Could not extract front page from PDF",
@@ -232,6 +274,14 @@ async def process_card_pdf(
             back_bytes=back_bytes,
             front_mime_type=front_mime_type,
             back_mime_type=back_mime_type,
+        )
+
+        # =====================================================
+        # WEBSITE ENRICHMENT
+        # =====================================================
+
+        card = await _safe_enrich_card(
+            card
         )
 
         # =====================================================
@@ -257,6 +307,7 @@ async def process_card_pdf(
         error_message = str(e)
 
         if "Gemini API quota exceeded" in error_message:
+
             raise HTTPException(
                 status_code=503,
                 detail=error_message,
@@ -279,6 +330,7 @@ async def process_card_pdf(
             detail=str(e),
         ) from e
 
+
 # ============================================================
 # URL
 # ============================================================
@@ -287,11 +339,41 @@ async def process_card_pdf(
 async def process_card_url(
     request: UrlRequest,
 ):
+    """
+    Process a company website URL
+    and enrich available company information.
+    """
+
     try:
+
+        # =====================================================
+        # BASIC URL PROCESSING
+        # =====================================================
 
         card = process_url(
             request.url
         )
+
+        # process_url() currently stores the URL as
+        # original_file_url.
+        #
+        # Website enrichment expects website_url.
+
+        card["website_url"] = (
+            request.url
+        )
+
+        # =====================================================
+        # WEBSITE ENRICHMENT
+        # =====================================================
+
+        card = await _safe_enrich_card(
+            card
+        )
+
+        # =====================================================
+        # RESPONSE
+        # =====================================================
 
         return {
             "success": True,
@@ -309,7 +391,7 @@ async def process_card_url(
         raise HTTPException(
             status_code=500,
             detail=str(e),
-        )
+        ) from e
 
 
 # ============================================================
