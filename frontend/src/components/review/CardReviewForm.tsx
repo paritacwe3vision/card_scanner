@@ -574,27 +574,36 @@ export default function CardReviewForm() {
         </div>
 
         {/* ============================================
-            QR DATA
-        ============================================ */}
+    QR DATA (ALL)
+============================================ */}
 
-        {formData.qr_raw && (
-          <div className="mt-6 rounded-lg border border-green-200 bg-green-50 p-4">
+{(formData.qr_codes && formData.qr_codes.length > 0) || formData.qr_raw ? (
+  <div className="mt-6 space-y-3">
+    <div className="flex items-center gap-2">
+      <QrCode className="h-5 w-5 text-green-600" />
+      <p className="font-medium text-green-800">
+        QR Code{((formData.qr_codes?.length || 0) > 1) ? "s" : ""} Detected
+      </p>
+    </div>
 
-            <div className="flex items-center gap-2 mb-2">
-              <QrCode className="h-5 w-5 text-green-600" />
-
-              <p className="font-medium text-green-800">
-                QR Code Data
-              </p>
-            </div>
-
-            <p className="text-sm text-green-700 break-all">
-              {formData.qr_raw}
-            </p>
-
-          </div>
-        )}
-
+    {(formData.qr_codes && formData.qr_codes.length > 0
+      ? formData.qr_codes
+      : [formData.qr_raw]
+    ).map((qr, index) => (
+      <div
+        key={index}
+        className="rounded-lg border border-green-200 bg-green-50 p-4"
+      >
+        <p className="text-xs text-green-600 mb-1">
+          QR {index + 1}
+        </p>
+        <p className="text-sm text-green-700 break-all">
+          {qr}
+        </p>
+      </div>
+    ))}
+  </div>
+) : null}
         {/* ============================================
             ERROR
         ============================================ */}

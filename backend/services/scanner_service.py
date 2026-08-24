@@ -106,28 +106,36 @@ def _safe_extract(
     extracted["_company_logo_bytes"] = logo_bytes
 
     # ========================================================
-    # 6. QR INFORMATION  (OpenCV + Gemini fallback)
+    # 6. QR INFORMATION  (OpenCV + Gemini, keep ALL)
     # ========================================================
 
-    # Prefer OpenCV results
-    if qr_codes:
-        extracted["qr_raw"] = qr_codes[0]
-        extracted["qr_codes"] = qr_codes
-    else:
-        # Fallback to Gemini's reading of the QR
-        gemini_qr = extracted.get("qr_content")
-        if gemini_qr and isinstance(gemini_qr, str) and gemini_qr.strip():
-            extracted["qr_raw"] = gemini_qr.strip()
-            extracted["qr_codes"] = [gemini_qr.strip()]
-        else:
-            extracted["qr_raw"] = None
-            extracted["qr_codes"] = []
+    all_qr_codes: list[str] = []
 
-    # Clean up internal field so it doesn't go to the frontend
+    # From OpenCV
+    if qr_codes:
+        for code in qr_codes:
+            if code and code.strip() and code.strip() not in all_qr_codes:
+                all_qr_codes.append(code.strip())
+
+    # From Gemini fallback
+    gemini_qr = extracted.get("qr_content")
+    if gemini_qr and isinstance(gemini_qr, str) and gemini_qr.strip():
+        value = gemini_qr.strip()
+        if value not in all_qr_codes:
+            all_qr_codes.append(value)
+
+    # Final result
+    if all_qr_codes:
+        extracted["qr_raw"] = all_qr_codes[0]          # first one (for compatibility)
+        extracted["qr_codes"] = all_qr_codes           # ALL codes
+    else:
+        extracted["qr_raw"] = None
+        extracted["qr_codes"] = []
+
+    # Clean up internal field
     extracted.pop("qr_content", None)
 
     return extracted
-
 # ============================================================
 # MERGE FRONT + BACK
 # ============================================================

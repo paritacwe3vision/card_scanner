@@ -14,6 +14,8 @@ export interface BusinessCard {
 
   address: string | null;
 
+  qr_codes?: string[] | null;
+
   email: string | null;
   phone: string | null;
 
@@ -43,6 +45,8 @@ export interface ExtractedCard {
 
   company_name?: string | null;
   designation?: string | null;
+
+  qr_codes?: string[] | null;
 
   address?: string | null;
 
