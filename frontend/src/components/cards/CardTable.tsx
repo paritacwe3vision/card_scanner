@@ -562,41 +562,87 @@ export default function CardTable() {
                 />
 
               </div>
-              {/* ================= QR CODE ================= */}
+          {/* ================= QR CODE ================= */}
 
-                {selectedCard.qr_raw && (
-                  <div className="mt-7">
-                    <h3 className="text-sm font-semibold text-gray-900 mb-4">
-                      QR Code
-                    </h3>
+          {selectedCard.qr_raw && (
+            <div className="mt-7">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">
+                QR Code
+              </h3>
 
-                    <div className="rounded-xl border border-green-200 bg-green-50 p-4">
-                      <div className="flex items-center gap-2 text-xs font-medium text-green-700 mb-2">
-                        <QrCode className="h-4 w-4" />
-                        <span>QR Code Data</span>
-                      </div>
+              <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+                <div className="flex items-center gap-2 text-xs font-medium text-green-700 mb-2">
+                  <QrCode className="h-4 w-4" />
+                  <span>QR Code Data</span>
+                </div>
 
-                      {/* Make it clickable if it's a URL */}
-                      {selectedCard.qr_raw.startsWith("http://") ||
-                      selectedCard.qr_raw.startsWith("https://") ? (
-                        <a
-                          href={selectedCard.qr_raw}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm font-medium text-green-800 hover:underline break-all flex items-center gap-1.5"
-                        >
-                          {selectedCard.qr_raw}
-                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                        </a>
-                      ) : (
-                        <p className="text-sm font-medium text-green-800 break-all">
-                          {selectedCard.qr_raw}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {(() => {
+                  const raw = selectedCard.qr_raw.trim();
+                  let href: string | null = null;
+                  let label = raw;
 
+                  // Website
+                  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+                    href = raw;
+                  }
+                  // WhatsApp
+                  else if (
+                    raw.startsWith("whatsapp://") ||
+                    raw.startsWith("https://wa.me/") ||
+                    raw.startsWith("https://api.whatsapp.com/")
+                  ) {
+                    href = raw.startsWith("whatsapp://")
+                      ? raw
+                      : raw;
+                  }
+                  // Instagram
+                  else if (
+                    raw.startsWith("instagram://") ||
+                    raw.includes("instagram.com/")
+                  ) {
+                    href = raw.startsWith("http") ? raw : `https://${raw}`;
+                  }
+                  // Phone number
+                  else if (raw.startsWith("tel:") || /^\+?[\d\s\-]{8,}$/.test(raw)) {
+                    href = raw.startsWith("tel:") ? raw : `tel:${raw.replace(/\s+/g, "")}`;
+                    label = raw.replace("tel:", "");
+                  }
+                  // Email
+                  else if (raw.startsWith("mailto:") || raw.includes("@")) {
+                    href = raw.startsWith("mailto:") ? raw : `mailto:${raw}`;
+                    label = raw.replace("mailto:", "");
+                  }
+                  // Plain Instagram username (e.g. @username or username)
+                  else if (raw.startsWith("@") || /^[a-zA-Z0-9._]{3,30}$/.test(raw)) {
+                    const username = raw.replace("@", "");
+                    href = `https://instagram.com/${username}`;
+                    label = `@${username}`;
+                  }
+
+                  if (href) {
+                    return (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-green-800 hover:underline break-all flex items-center gap-1.5"
+                      >
+                        {label}
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                      </a>
+                    );
+                  }
+
+                  // Fallback – just show the text
+                  return (
+                    <p className="text-sm font-medium text-green-800 break-all">
+                      {raw}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
               {/* ================= DATES ================= */}
 
               <div className="mt-7 grid grid-cols-1 md:grid-cols-2 gap-4">
