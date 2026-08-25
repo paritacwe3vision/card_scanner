@@ -1,4 +1,5 @@
 from typing import Optional
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -23,7 +24,15 @@ class CardCreate(BaseModel):
 
     other_details: Optional[str] = None
 
-    qr_raw: Optional[str] = None          # ← important
+    # =====================================================
+    # QR CODE DATA
+    # =====================================================
+
+    # First QR code - kept for backward compatibility
+    qr_raw: Optional[str] = None
+
+    # All detected QR codes
+    qr_codes: Optional[list[str]] = None
 
     model_config = ConfigDict(
         extra="ignore"

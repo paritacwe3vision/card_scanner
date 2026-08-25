@@ -1,7 +1,14 @@
 import cv2
 import numpy as np
+
 from typing import Optional
 
+from pyzbar.pyzbar import decode as pyzbar_decode
+
+
+# ============================================================
+# BYTES -> IMAGE
+# ============================================================
 
 def bytes_to_image(file_bytes: bytes) -> np.ndarray:
     """
@@ -11,15 +18,27 @@ def bytes_to_image(file_bytes: bytes) -> np.ndarray:
     if not file_bytes:
         raise ValueError("Image bytes are empty")
 
-    np_array = np.frombuffer(file_bytes, dtype=np.uint8)
+    np_array = np.frombuffer(
+        file_bytes,
+        dtype=np.uint8,
+    )
 
-    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+    image = cv2.imdecode(
+        np_array,
+        cv2.IMREAD_COLOR,
+    )
 
     if image is None:
-        raise ValueError("Unable to decode image")
+        raise ValueError(
+            "Unable to decode image"
+        )
 
     return image
 
+
+# ============================================================
+# IMAGE -> BYTES
+# ============================================================
 
 def image_to_bytes(
     image: np.ndarray,
@@ -29,13 +48,22 @@ def image_to_bytes(
     Convert an OpenCV image back into image bytes.
     """
 
-    success, encoded = cv2.imencode(extension, image)
+    success, encoded = cv2.imencode(
+        extension,
+        image,
+    )
 
     if not success:
-        raise ValueError("Unable to encode processed image")
+        raise ValueError(
+            "Unable to encode processed image"
+        )
 
     return encoded.tobytes()
 
+
+# ============================================================
+# PREPROCESS IMAGE
+# ============================================================
 
 def preprocess_image(
     file_bytes: bytes,
@@ -55,7 +83,9 @@ def preprocess_image(
     The returned bytes can be sent to the VLM.
     """
 
-    image = bytes_to_image(file_bytes)
+    image = bytes_to_image(
+        file_bytes
+    )
 
     # -----------------------------------------
     # 1. Resize
@@ -65,14 +95,23 @@ def preprocess_image(
 
     if width > target_width:
 
-        scale = target_width / float(width)
+        scale = (
+            target_width
+            / float(width)
+        )
 
         new_width = target_width
-        new_height = int(height * scale)
+
+        new_height = int(
+            height * scale
+        )
 
         image = cv2.resize(
             image,
-            (new_width, new_height),
+            (
+                new_width,
+                new_height,
+            ),
             interpolation=cv2.INTER_AREA,
         )
 
@@ -85,7 +124,9 @@ def preprocess_image(
         cv2.COLOR_BGR2LAB,
     )
 
-    l_channel, a_channel, b_channel = cv2.split(lab)
+    l_channel, a_channel, b_channel = (
+        cv2.split(lab)
+    )
 
     # -----------------------------------------
     # 3. Improve contrast
@@ -96,7 +137,9 @@ def preprocess_image(
         tileGridSize=(8, 8),
     )
 
-    l_channel = clahe.apply(l_channel)
+    l_channel = clahe.apply(
+        l_channel
+    )
 
     lab = cv2.merge(
         (
@@ -149,125 +192,468 @@ def preprocess_image(
         extension=".jpg",
     )
 
-def detect_qr_code(file_bytes: bytes) -> Optional[str]:
-    results = detect_qr_codes(file_bytes)
-    return results[0] if results else None
+
+# ============================================================
+# SINGLE QR CODE
+# ============================================================
+
+def detect_qr_code(
+    file_bytes: bytes,
+) -> Optional[str]:
+    """
+    Backward-compatible single QR detector.
+
+    Returns the first QR code found.
+
+    For multiple QR codes use:
+        detect_qr_codes()
+    """
+
+    results = detect_qr_codes(
+        file_bytes
+    )
+
+    if results:
+        return results[0]
+
+    return None
 
 
-def detect_qr_codes(file_bytes: bytes) -> list[str]:
+# ============================================================
+# MULTIPLE QR CODE DETECTION
+# ============================================================
+
+def detect_qr_codes(
+    file_bytes: bytes,
+) -> list[str]:
     """
-    High-accuracy multi-strategy QR detection for business cards.
+    Detect ALL QR codes from a business-card image.
+
+    Detection strategies:
+
+    1. OpenCV Multi QR
+    2. OpenCV Single QR
+    3. pyzbar / zbar
+    4. Original color image
+    5. CLAHE
+    6. Adaptive threshold
+    7. Otsu threshold
+    8. Upscaling
+    9. Rotation
+    10. Sharpening
+
+    Every QR result is collected.
+
+    Duplicate QR values are removed.
+
+    IMPORTANT:
+    This function intentionally does NOT return
+    immediately after finding a QR code.
     """
+
     if not file_bytes:
         return []
 
-    image = bytes_to_image(file_bytes)
+    # --------------------------------------------------------
+    # Decode image
+    # --------------------------------------------------------
+
+    image = bytes_to_image(
+        file_bytes
+    )
+
     detector = cv2.QRCodeDetector()
+
+    # --------------------------------------------------------
+    # Store all unique QR codes
+    # --------------------------------------------------------
+
     found: list[str] = []
 
-    def _add(value: str | None):
-        if value and isinstance(value, str):
-            cleaned = value.strip()
-            if cleaned and cleaned not in found:
-                found.append(cleaned)
-
-    def _try(img: np.ndarray):
-        # Multi QR
-        try:
-            success, decoded_info, _, _ = detector.detectAndDecodeMulti(img)
-            if success and decoded_info:
-                for v in decoded_info:
-                    _add(v)
-        except Exception:
-            pass
-
-        # Single QR
-        try:
-            data, _, _ = detector.detectAndDecode(img)
-            _add(data)
-        except Exception:
-            pass
-
     # --------------------------------------------------------
-    # 1. Original color image
+    # Add unique QR
     # --------------------------------------------------------
-    _try(image)
-    if found:
-        return found
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    def _add(
+        value: str | None,
+    ):
+        """
+        Add a QR value if it is valid
+        and not already detected.
+        """
 
-    # --------------------------------------------------------
-    # 2. Strong CLAHE
-    # --------------------------------------------------------
-    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
-    _try(enhanced)
-    if found:
-        return found
+        if not value:
+            return
 
-    # --------------------------------------------------------
-    # 3. Multiple adaptive thresholds
-    # --------------------------------------------------------
-    for block in (21, 31, 41, 51, 71):
-        for c in (3, 5, 7, 10, 15):
-            adaptive = cv2.adaptiveThreshold(
-                gray, 255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY,
-                block, c
+        if not isinstance(
+            value,
+            str,
+        ):
+            return
+
+        cleaned = value.strip()
+
+        if (
+            cleaned
+            and cleaned not in found
+        ):
+            found.append(
+                cleaned
             )
+
+    # --------------------------------------------------------
+    # Try all detectors
+    # --------------------------------------------------------
+
+    def _try(
+        img: np.ndarray,
+    ):
+        """
+        Run OpenCV and pyzbar
+        against one image variant.
+        """
+
+        # ====================================================
+        # 1. OpenCV Multi QR
+        # ====================================================
+
+        try:
+
+            (
+                success,
+                decoded_info,
+                points,
+                straight_qrcode,
+            ) = detector.detectAndDecodeMulti(
+                img
+            )
+
+            if (
+                success
+                and decoded_info
+            ):
+
+                for value in decoded_info:
+
+                    _add(value)
+
+        except Exception as exc:
+
+            print(
+                "OpenCV multi QR detection failed:",
+                exc,
+            )
+
+        # ====================================================
+        # 2. OpenCV Single QR
+        # ====================================================
+
+        try:
+
+            (
+                data,
+                points,
+                straight_qrcode,
+            ) = detector.detectAndDecode(
+                img
+            )
+
+            _add(data)
+
+        except Exception as exc:
+
+            print(
+                "OpenCV single QR detection failed:",
+                exc,
+            )
+
+        # ====================================================
+        # 3. pyzbar / zbar
+        # ====================================================
+
+        try:
+
+            decoded_objects = (
+                pyzbar_decode(img)
+            )
+
+            for obj in decoded_objects:
+
+                # Only process QR codes
+                if obj.type != "QRCODE":
+                    continue
+
+                try:
+
+                    value = (
+                        obj.data
+                        .decode("utf-8")
+                        .strip()
+                    )
+
+                except UnicodeDecodeError:
+
+                    continue
+
+                _add(value)
+
+        except Exception as exc:
+
+            print(
+                "pyzbar QR detection failed:",
+                exc,
+            )
+
+    # ========================================================
+    # 1. ORIGINAL COLOR IMAGE
+    # ========================================================
+
+    _try(image)
+
+    # IMPORTANT:
+    #
+    # DO NOT:
+    #
+    # if found:
+    #     return found
+    #
+    # We must continue searching for
+    # additional QR codes.
+    #
+
+    # ========================================================
+    # Convert to grayscale
+    # ========================================================
+
+    gray = cv2.cvtColor(
+        image,
+        cv2.COLOR_BGR2GRAY,
+    )
+
+    # ========================================================
+    # 2. STRONG CLAHE
+    # ========================================================
+
+    clahe = cv2.createCLAHE(
+        clipLimit=4.0,
+        tileGridSize=(8, 8),
+    )
+
+    enhanced = clahe.apply(
+        gray
+    )
+
+    _try(enhanced)
+
+    # ========================================================
+    # 3. ADAPTIVE THRESHOLD
+    # ========================================================
+
+    for block in (
+        21,
+        31,
+        41,
+        51,
+        71,
+    ):
+
+        for c in (
+            3,
+            5,
+            7,
+            10,
+            15,
+        ):
+
+            adaptive = (
+                cv2.adaptiveThreshold(
+                    gray,
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY,
+                    block,
+                    c,
+                )
+            )
+
+            # Normal threshold
             _try(adaptive)
-            if found:
-                return found
 
-            # Also try inverted
-            _try(cv2.bitwise_not(adaptive))
-            if found:
-                return found
+            # Inverted threshold
+            _try(
+                cv2.bitwise_not(
+                    adaptive
+                )
+            )
 
-    # --------------------------------------------------------
-    # 4. Otsu + variants
-    # --------------------------------------------------------
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # ========================================================
+    # 4. OTSU THRESHOLD
+    # ========================================================
+
+    blurred = cv2.GaussianBlur(
+        gray,
+        (3, 3),
+        0,
+    )
+
+    _, otsu = cv2.threshold(
+        blurred,
+        0,
+        255,
+        (
+            cv2.THRESH_BINARY
+            + cv2.THRESH_OTSU
+        ),
+    )
+
     _try(otsu)
-    _try(cv2.bitwise_not(otsu))
-    if found:
-        return found
 
-    # --------------------------------------------------------
-    # 5. Upscale (very important for small QRs)
-    # --------------------------------------------------------
-    h, w = gray.shape[:2]
-    for scale in (1.5, 2.0, 2.5, 3.0):
-        up = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-        _try(up)
-        _try(clahe.apply(up))
-        if found:
-            return found
+    _try(
+        cv2.bitwise_not(
+            otsu
+        )
+    )
 
-    # --------------------------------------------------------
-    # 6. Slight rotations (phone photos are rarely straight)
-    # --------------------------------------------------------
-    center = (w // 2, h // 2)
-    for angle in (-12, -8, -5, -3, 3, 5, 8, 12):
-        matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-        rotated = cv2.warpAffine(gray, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    # ========================================================
+    # 5. UPSCALE
+    # ========================================================
+
+    for scale in (
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+    ):
+
+        upscaled = cv2.resize(
+            gray,
+            None,
+            fx=scale,
+            fy=scale,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+        # Normal upscaled
+        _try(upscaled)
+
+        # CLAHE upscaled
+        _try(
+            clahe.apply(
+                upscaled
+            )
+        )
+
+    # ========================================================
+    # 6. ROTATION
+    # ========================================================
+
+    height, width = gray.shape[:2]
+
+    center = (
+        width // 2,
+        height // 2,
+    )
+
+    for angle in (
+        -12,
+        -8,
+        -5,
+        -3,
+        3,
+        5,
+        8,
+        12,
+    ):
+
+        matrix = cv2.getRotationMatrix2D(
+            center,
+            angle,
+            1.0,
+        )
+
+        rotated = cv2.warpAffine(
+            gray,
+            matrix,
+            (
+                width,
+                height,
+            ),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+
+        # Rotated
         _try(rotated)
-        _try(clahe.apply(rotated))
-        if found:
-            return found
 
-    # --------------------------------------------------------
-    # 7. Sharpen + detect again
-    # --------------------------------------------------------
-    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
-    sharpened = cv2.filter2D(gray, -1, kernel)
+        # Rotated + CLAHE
+        _try(
+            clahe.apply(
+                rotated
+            )
+        )
+
+    # ========================================================
+    # 7. SHARPEN
+    # ========================================================
+
+    kernel = np.array(
+        [
+            [0, -1, 0],
+            [-1, 5, -1],
+            [0, -1, 0],
+        ],
+        dtype=np.float32,
+    )
+
+    sharpened = cv2.filter2D(
+        gray,
+        -1,
+        kernel,
+    )
+
     _try(sharpened)
-    _try(clahe.apply(sharpened))
+
+    _try(
+        clahe.apply(
+            sharpened
+        )
+    )
+
+    # ========================================================
+    # FINAL RESULT
+    # ========================================================
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "QR detection complete."
+    )
+
+    print(
+        f"Found {len(found)} unique QR code(s)."
+    )
+
+    for index, value in enumerate(
+        found,
+        start=1,
+    ):
+
+        print(
+            f"QR {index}: {value}"
+        )
+
+    print(
+        "========================================"
+    )
 
     return found
+
+
+# ============================================================
+# RESIZE IMAGE
+# ============================================================
 
 def resize_image(
     file_bytes: bytes,
@@ -278,7 +664,9 @@ def resize_image(
     Resize an image while maintaining aspect ratio.
     """
 
-    image = bytes_to_image(file_bytes)
+    image = bytes_to_image(
+        file_bytes
+    )
 
     height, width = image.shape[:2]
 
@@ -290,12 +678,20 @@ def resize_image(
 
     if scale < 1.0:
 
-        new_width = int(width * scale)
-        new_height = int(height * scale)
+        new_width = int(
+            width * scale
+        )
+
+        new_height = int(
+            height * scale
+        )
 
         image = cv2.resize(
             image,
-            (new_width, new_height),
+            (
+                new_width,
+                new_height,
+            ),
             interpolation=cv2.INTER_AREA,
         )
 
@@ -304,6 +700,10 @@ def resize_image(
         extension=".jpg",
     )
 
+
+# ============================================================
+# CROP CARD
+# ============================================================
 
 def crop_card(
     file_bytes: bytes,
@@ -315,7 +715,9 @@ def crop_card(
     If detection fails, returns the original image.
     """
 
-    image = bytes_to_image(file_bytes)
+    image = bytes_to_image(
+        file_bytes
+    )
 
     original = image.copy()
 
@@ -342,14 +744,19 @@ def crop_card(
         cv2.CHAIN_APPROX_SIMPLE,
     )
 
-    image_area = image.shape[0] * image.shape[1]
+    image_area = (
+        image.shape[0]
+        * image.shape[1]
+    )
 
     best_contour = None
     best_area = 0
 
     for contour in contours:
 
-        area = cv2.contourArea(contour)
+        area = cv2.contourArea(
+            contour
+        )
 
         if area < image_area * 0.10:
             continue
@@ -365,36 +772,64 @@ def crop_card(
             True,
         )
 
-        if len(approx) == 4 and area > best_area:
+        if (
+            len(approx) == 4
+            and area > best_area
+        ):
 
             best_area = area
             best_contour = approx
 
     if best_contour is None:
-        return image_to_bytes(original)
 
-    points = best_contour.reshape(4, 2)
+        return image_to_bytes(
+            original
+        )
 
+    points = (
+        best_contour.reshape(
+            4,
+            2,
+        )
+    )
+
+    # --------------------------------------------------------
     # Order points:
-    # top-left, top-right, bottom-right, bottom-left
+    # top-left
+    # top-right
+    # bottom-right
+    # bottom-left
+    # --------------------------------------------------------
 
     rect = np.zeros(
         (4, 2),
         dtype=np.float32,
     )
 
-    sums = points.sum(axis=1)
+    sums = points.sum(
+        axis=1
+    )
 
-    rect[0] = points[np.argmin(sums)]
-    rect[2] = points[np.argmax(sums)]
+    rect[0] = points[
+        np.argmin(sums)
+    ]
+
+    rect[2] = points[
+        np.argmax(sums)
+    ]
 
     differences = np.diff(
         points,
         axis=1,
     )
 
-    rect[1] = points[np.argmin(differences)]
-    rect[3] = points[np.argmax(differences)]
+    rect[1] = points[
+        np.argmin(differences)
+    ]
+
+    rect[3] = points[
+        np.argmax(differences)
+    ]
 
     width_a = np.linalg.norm(
         rect[2] - rect[3]
@@ -422,15 +857,30 @@ def crop_card(
         int(height_b),
     )
 
-    if max_width <= 0 or max_height <= 0:
-        return image_to_bytes(original)
+    if (
+        max_width <= 0
+        or max_height <= 0
+    ):
+
+        return image_to_bytes(
+            original
+        )
 
     destination = np.array(
         [
             [0, 0],
-            [max_width - 1, 0],
-            [max_width - 1, max_height - 1],
-            [0, max_height - 1],
+            [
+                max_width - 1,
+                0,
+            ],
+            [
+                max_width - 1,
+                max_height - 1,
+            ],
+            [
+                0,
+                max_height - 1,
+            ],
         ],
         dtype=np.float32,
     )
@@ -449,12 +899,11 @@ def crop_card(
         ),
     )
 
-    return image_to_bytes(warped)
+    return image_to_bytes(
+        warped
+    )
 
 
-# ============================================================
-# CROP NORMALIZED REGION
-# ============================================================
 # ============================================================
 # CROP NORMALIZED REGION
 # ============================================================
@@ -483,6 +932,7 @@ def crop_normalized_region(
     # --------------------------------------------------------
 
     if not file_bytes:
+
         raise ValueError(
             "Image bytes are empty"
         )
@@ -491,12 +941,17 @@ def crop_normalized_region(
     # Validate bounding box
     # --------------------------------------------------------
 
-    if not isinstance(bbox, list):
+    if not isinstance(
+        bbox,
+        list,
+    ):
+
         raise ValueError(
             "Bounding box must be a list"
         )
 
     if len(bbox) != 4:
+
         raise ValueError(
             "Bounding box must contain exactly 4 values"
         )
@@ -509,19 +964,26 @@ def crop_normalized_region(
         file_bytes
     )
 
-    image_height, image_width = image.shape[:2]
+    image_height, image_width = (
+        image.shape[:2]
+    )
 
     # --------------------------------------------------------
     # Read Gemini coordinates
     # --------------------------------------------------------
 
     try:
+
         ymin = int(bbox[0])
         xmin = int(bbox[1])
         ymax = int(bbox[2])
         xmax = int(bbox[3])
 
-    except (TypeError, ValueError) as exc:
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+
         raise ValueError(
             "Bounding box coordinates must be integers"
         ) from exc
@@ -555,11 +1017,13 @@ def crop_normalized_region(
     # --------------------------------------------------------
 
     if ymax <= ymin:
+
         raise ValueError(
             "Invalid logo bounding box height"
         )
 
     if xmax <= xmin:
+
         raise ValueError(
             "Invalid logo bounding box width"
         )
@@ -593,6 +1057,7 @@ def crop_normalized_region(
     # --------------------------------------------------------
 
     crop_width = x2 - x1
+
     crop_height = y2 - y1
 
     padding_x = int(
@@ -633,6 +1098,7 @@ def crop_normalized_region(
     ]
 
     if cropped.size == 0:
+
         raise ValueError(
             "Logo crop resulted in an empty image"
         )
@@ -646,104 +1112,205 @@ def crop_normalized_region(
         extension=".png",
     )
 
-def categorize_qr(content: str) -> dict:
+
+# ============================================================
+# CATEGORIZE QR
+# ============================================================
+
+def categorize_qr(
+    content: str,
+) -> dict:
     """
     Categorize a decoded QR code content.
     """
+
     if not content:
+
         return {
             "raw": content,
             "type": "other",
             "label": "Other",
-            "url": None
+            "url": None,
         }
 
     raw = content.strip()
+
     lower = raw.lower()
 
+    # ========================================================
     # Instagram
+    # ========================================================
+
     if (
         "instagram.com" in lower
-        or lower.startswith("instagram://")
-        or (lower.startswith("@") and len(lower) < 35)
+        or lower.startswith(
+            "instagram://"
+        )
+        or (
+            lower.startswith("@")
+            and len(lower) < 35
+        )
     ):
+
         username = raw
+
         if "instagram.com/" in lower:
-            username = raw.split("instagram.com/")[-1].split("?")[0].strip("/")
+
+            username = (
+                raw
+                .split(
+                    "instagram.com/"
+                )[-1]
+                .split("?")[0]
+                .strip("/")
+            )
+
         elif lower.startswith("@"):
+
             username = raw[1:]
-        
-        url = f"https://www.instagram.com/{username}"
+
+        url = (
+            f"https://www.instagram.com/"
+            f"{username}"
+        )
+
         return {
             "raw": raw,
             "type": "instagram",
             "label": "Instagram",
-            "url": url
+            "url": url,
         }
 
+    # ========================================================
     # WhatsApp
+    # ========================================================
+
     if (
         "wa.me" in lower
         or "whatsapp" in lower
-        or lower.startswith("whatsapp://")
+        or lower.startswith(
+            "whatsapp://"
+        )
     ):
+
         return {
             "raw": raw,
             "type": "whatsapp",
             "label": "WhatsApp",
-            "url": raw if raw.startswith("http") else f"https://{raw}"
+            "url": (
+                raw
+                if raw.startswith("http")
+                else f"https://{raw}"
+            ),
         }
 
+    # ========================================================
     # Phone
-    if lower.startswith("tel:") or (
-        lower.replace("+", "").replace(" ", "").replace("-", "").isdigit()
-        and len(lower.replace(" ", "")) >= 8
+    # ========================================================
+
+    if (
+        lower.startswith("tel:")
+        or (
+            lower
+            .replace("+", "")
+            .replace(" ", "")
+            .replace("-", "")
+            .isdigit()
+            and len(
+                lower.replace(" ", "")
+            ) >= 8
+        )
     ):
-        phone = raw.replace("tel:", "").strip()
+
+        phone = (
+            raw
+            .replace(
+                "tel:",
+                "",
+            )
+            .strip()
+        )
+
         return {
             "raw": raw,
             "type": "phone",
             "label": "Phone",
-            "url": f"tel:{phone}"
+            "url": f"tel:{phone}",
         }
 
+    # ========================================================
     # Email
-    if lower.startswith("mailto:") or ("@" in lower and "." in lower):
-        email = raw.replace("mailto:", "").strip()
+    # ========================================================
+
+    if (
+        lower.startswith("mailto:")
+        or (
+            "@" in lower
+            and "." in lower
+        )
+    ):
+
+        email = (
+            raw
+            .replace(
+                "mailto:",
+                "",
+            )
+            .strip()
+        )
+
         return {
             "raw": raw,
             "type": "email",
             "label": "Email",
-            "url": f"mailto:{email}"
+            "url": f"mailto:{email}",
         }
 
+    # ========================================================
     # Location / Maps
+    # ========================================================
+
     if (
         "maps.google" in lower
         or "goo.gl/maps" in lower
         or lower.startswith("geo:")
         or "maps.app.goo.gl" in lower
     ):
+
         return {
             "raw": raw,
             "type": "location",
             "label": "Location",
-            "url": raw if raw.startswith("http") else f"https://{raw}"
+            "url": (
+                raw
+                if raw.startswith("http")
+                else f"https://{raw}"
+            ),
         }
 
+    # ========================================================
     # Website
-    if lower.startswith("http://") or lower.startswith("https://"):
+    # ========================================================
+
+    if (
+        lower.startswith("http://")
+        or lower.startswith("https://")
+    ):
+
         return {
             "raw": raw,
             "type": "website",
             "label": "Website",
-            "url": raw
+            "url": raw,
         }
 
+    # ========================================================
     # Fallback
+    # ========================================================
+
     return {
         "raw": raw,
         "type": "other",
         "label": "Other",
-        "url": None
+        "url": None,
     }

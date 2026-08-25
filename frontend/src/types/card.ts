@@ -14,7 +14,7 @@ export interface BusinessCard {
 
   address: string | null;
 
-  qr_codes?: string[] | null;
+  qr_codes?: string[];
 
   email: string | null;
   phone: string | null;

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 import { ExtractedCard } from "@/types/card";
-import { saveCard } from "@/services/api";
+import { saveCard, getCards } from "@/services/api";
 
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
@@ -21,6 +21,8 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 
 export default function CardReviewForm() {
   const router = useRouter();
+  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
+  const [pendingSaveData, setPendingSaveData] = useState<any>(null);
 
   const [formData, setFormData] = useState<ExtractedCard>({
     owner_name: "",
@@ -45,6 +47,8 @@ export default function CardReviewForm() {
     original_file_url: null,
 
     qr_raw: null,
+    qr_codes: [],
+
     other_details: "",
   });
 
@@ -68,6 +72,28 @@ export default function CardReviewForm() {
       const card = JSON.parse(stored);
 
       console.log("Extracted card:", card);
+      console.log("Extracted QR codes:", card.qr_codes);
+
+      /*
+       * Support both:
+       *
+       * 1. New format:
+       *    qr_codes: ["QR1", "QR2"]
+       *
+       * 2. Old format:
+       *    qr_raw: "QR1"
+       *
+       * This keeps backward compatibility.
+       */
+
+      const qrCodes: string[] = Array.isArray(card.qr_codes)
+        ? card.qr_codes.filter(
+            (qr: unknown): qr is string =>
+              typeof qr === "string" && qr.trim().length > 0
+          )
+        : card.qr_raw
+          ? [card.qr_raw]
+          : [];
 
       setFormData({
         owner_name: card.owner_name ?? "",
@@ -91,13 +117,24 @@ export default function CardReviewForm() {
         source_type: card.source_type ?? "scan",
         original_file_url: card.original_file_url ?? null,
 
-        qr_raw: card.qr_raw ?? null,
+        /*
+         * Keep the first QR in qr_raw for backward compatibility.
+         */
+        qr_raw: card.qr_raw ?? qrCodes[0] ?? null,
+
+        /*
+         * IMPORTANT:
+         * Store ALL QR codes.
+         */
+        qr_codes: qrCodes,
+
         other_details: card.other_details ?? "",
       });
 
       setIsReady(true);
     } catch (err) {
       console.error(err);
+
       setError("Invalid extracted card data");
       setIsReady(true);
     }
@@ -121,14 +158,78 @@ export default function CardReviewForm() {
   // --------------------------------------------------
   // SAVE CARD
   // --------------------------------------------------
-
   const handleSave = async () => {
     setIsLoading(true);
     setError(null);
-
+  
     try {
-      const response = await saveCard(formData);
+      // Clean QR list
+      const qrCodes = Array.isArray(formData.qr_codes)
+        ? formData.qr_codes.filter(
+            (qr): qr is string => typeof qr === "string" && qr.trim().length > 0
+          )
+        : [];
+  
+      const joinedQrRaw = qrCodes.length > 0 ? qrCodes.join(" ||| ") : null;
+  
+      const dataToSave = {
+        owner_name: formData.owner_name?.trim() || "Unknown",
+        designation: formData.designation?.trim() || null,
+        company_name: formData.company_name?.trim() || null,
+        address: formData.address?.trim() || null,
+        email: formData.email?.trim() || null,
+        phone: formData.phone?.trim() || null,
+        gst_number: formData.gst_number?.trim() || null,
+        company_logo: formData.company_logo || null,
+        website_url: formData.website_url?.trim() || null,
+        instagram_url: formData.instagram_url?.trim() || null,
+        facebook_url: formData.facebook_url?.trim() || null,
+        linkedin_url: formData.linkedin_url?.trim() || null,
+        other_details: formData.other_details?.trim() || null,
+        qr_raw: joinedQrRaw,
+      };
+  
+// ============================================
+// CHECK FOR DUPLICATE COMPANY NAME
+// ============================================
+const companyName = dataToSave.company_name?.trim() || null;
 
+if (companyName) {
+  const existing = await getCards();
+
+  if (existing.success && existing.data) {
+    const isDuplicate = existing.data.some(
+      (card: any) =>
+        card.company_name &&
+        card.company_name.toLowerCase().trim() ===
+          companyName.toLowerCase()
+    );
+
+    if (isDuplicate) {
+      // Show confirmation popup
+      setPendingSaveData(dataToSave);
+      setShowDuplicateConfirm(true);
+      setIsLoading(false);
+      return;
+    }
+  }
+}
+
+// No duplicate → save directly
+await performSave(dataToSave);
+    } catch (err: any) {
+      console.error("SAVE CARD ERROR:", err);
+      setError(err?.message || "Something went wrong while saving the card");
+      setIsLoading(false);
+    }
+  };
+  
+  // Actual save function
+  const performSave = async (dataToSave: any) => {
+    try {
+      setIsLoading(true);
+      const response = await saveCard(dataToSave as any);
+  
       if (response.success) {
         sessionStorage.removeItem("extractedCard");
         router.push("/cards");
@@ -136,13 +237,11 @@ export default function CardReviewForm() {
         setError(response.message || "Failed to save card");
       }
     } catch (err: any) {
-      console.error(err);
-
-      setError(
-        err?.message || "Something went wrong while saving the card"
-      );
+      setError(err?.message || "Something went wrong while saving the card");
     } finally {
       setIsLoading(false);
+      setShowDuplicateConfirm(false);
+      setPendingSaveData(null);
     }
   };
 
@@ -155,13 +254,29 @@ export default function CardReviewForm() {
       return;
     }
 
-    const encodedAddress = encodeURIComponent(formData.address);
+    const encodedAddress = encodeURIComponent(
+      formData.address
+    );
 
     window.open(
       `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`,
       "_blank"
     );
   };
+
+  // --------------------------------------------------
+  // QR DATA
+  // --------------------------------------------------
+
+  const qrCodes =
+    Array.isArray(formData.qr_codes) &&
+    formData.qr_codes.length > 0
+      ? formData.qr_codes
+      : formData.qr_raw
+        ? [formData.qr_raw]
+        : [];
+
+  const qrCount = qrCodes.length;
 
   // --------------------------------------------------
   // LOADING
@@ -196,8 +311,8 @@ export default function CardReviewForm() {
           </h2>
 
           <p className="mt-1 text-sm text-gray-500">
-            Review the scanned card and automatically extracted information
-            before saving.
+            Review the scanned card and automatically extracted
+            information before saving.
           </p>
         </div>
 
@@ -333,19 +448,19 @@ export default function CardReviewForm() {
             </div>
           </div>
 
-          {/* QR CODE */}
+          {/* QR CODE SUMMARY */}
 
           <div className="flex items-center gap-4">
             <div
               className={`h-20 w-20 rounded-xl flex items-center justify-center ${
-                formData.qr_raw
+                qrCount > 0
                   ? "bg-green-50 border border-green-200"
                   : "bg-gray-100"
               }`}
             >
               <QrCode
                 className={`h-8 w-8 ${
-                  formData.qr_raw
+                  qrCount > 0
                     ? "text-green-600"
                     : "text-gray-400"
                 }`}
@@ -354,12 +469,12 @@ export default function CardReviewForm() {
 
             <div>
               <p className="text-sm font-medium text-gray-700">
-                QR Code
+                QR Code{qrCount > 1 ? "s" : ""}
               </p>
 
               <p className="text-xs text-gray-500">
-                {formData.qr_raw
-                  ? "Detected"
+                {qrCount > 0
+                  ? `${qrCount} detected`
                   : "Not found"}
               </p>
             </div>
@@ -574,36 +689,40 @@ export default function CardReviewForm() {
         </div>
 
         {/* ============================================
-    QR DATA (ALL)
-============================================ */}
+            ALL QR DATA
+        ============================================ */}
 
-{(formData.qr_codes && formData.qr_codes.length > 0) || formData.qr_raw ? (
-  <div className="mt-6 space-y-3">
-    <div className="flex items-center gap-2">
-      <QrCode className="h-5 w-5 text-green-600" />
-      <p className="font-medium text-green-800">
-        QR Code{((formData.qr_codes?.length || 0) > 1) ? "s" : ""} Detected
-      </p>
-    </div>
+        {qrCount > 0 && (
+          <div className="mt-6 space-y-3">
 
-    {(formData.qr_codes && formData.qr_codes.length > 0
-      ? formData.qr_codes
-      : [formData.qr_raw]
-    ).map((qr, index) => (
-      <div
-        key={index}
-        className="rounded-lg border border-green-200 bg-green-50 p-4"
-      >
-        <p className="text-xs text-green-600 mb-1">
-          QR {index + 1}
-        </p>
-        <p className="text-sm text-green-700 break-all">
-          {qr}
-        </p>
-      </div>
-    ))}
-  </div>
-) : null}
+            <div className="flex items-center gap-2">
+              <QrCode className="h-5 w-5 text-green-600" />
+
+              <p className="font-medium text-green-800">
+                QR Code{qrCount > 1 ? "s" : ""} Detected
+              </p>
+            </div>
+
+            {qrCodes.map((qr, index) => (
+              <div
+                key={`${qr}-${index}`}
+                className="rounded-lg border border-green-200 bg-green-50 p-4"
+              >
+
+                <p className="text-xs text-green-600 mb-1">
+                  QR {index + 1}
+                </p>
+
+                <p className="text-sm text-green-700 break-all">
+                  {qr}
+                </p>
+
+              </div>
+            ))}
+
+          </div>
+        )}
+
         {/* ============================================
             ERROR
         ============================================ */}
@@ -642,6 +761,62 @@ export default function CardReviewForm() {
           </Button>
 
         </div>
+        {/* ========== DUPLICATE COMPANY CONFIRMATION ========== */}
+{showDuplicateConfirm && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div
+      className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+      onClick={() => {
+        setShowDuplicateConfirm(false);
+        setPendingSaveData(null);
+      }}
+    />
+
+    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+      <div className="flex flex-col items-center text-center">
+        <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mb-4">
+          <Building2 className="h-7 w-7 text-amber-600" />
+        </div>
+
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+          Company Already Exists
+        </h3>
+
+        <p className="text-sm text-gray-600 mb-6">
+          A card with company name{" "}
+          <span className="font-semibold text-gray-900">
+            “{pendingSaveData?.company_name}”
+          </span>{" "}
+          is already saved.
+          <br />
+          Do you still want to save this card?
+        </p>
+
+        <div className="flex gap-3 w-full">
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={() => {
+              setShowDuplicateConfirm(false);
+              setPendingSaveData(null);
+            }}
+            disabled={isLoading}
+          >
+            No, Cancel
+          </Button>
+
+          <Button
+            className="flex-1"
+            onClick={() => performSave(pendingSaveData)}
+            isLoading={isLoading}
+          >
+            Yes, Save Anyway
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
       </div>
     </div>
