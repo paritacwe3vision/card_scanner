@@ -5,7 +5,7 @@ import React, {
   useState,
   useEffect,
 } from "react";
-
+import jsQR from "jsqr";
 import { useRouter } from "next/navigation";
 
 import {
@@ -66,7 +66,12 @@ interface ExtractedCard {
 
 export default function ScanUploader() {
   const router = useRouter();
-
+  const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(true);
+  const [stableQrFrames, setStableQrFrames] = useState(0);
+  const [isAutoCapturing, setIsAutoCapturing] = useState(false);
+  const lastQrRef = useRef<string | null>(null);
+  const stableQrFramesRef = useRef(0);
+  const animationRef = useRef<number | null>(null);
   /*
    * Camera references
    */
@@ -219,6 +224,7 @@ export default function ScanUploader() {
             .play()
             .then(() => {
               setIsStarting(false);
+              startQRScanning();
             })
             .catch(() => {
               setError(
@@ -252,22 +258,157 @@ export default function ScanUploader() {
   ========================================================= */
 
   const stopCamera = () => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+  
     if (streamRef.current) {
-      streamRef.current
-        .getTracks()
-        .forEach((track) => track.stop());
-
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
-
+  
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-
+  
     setIsCameraActive(false);
     setIsStarting(false);
+    setStableQrFrames(0);
+    stableQrFramesRef.current = 0;
+    lastQrRef.current = null;
+  };
+/* =========================================================
+   QR SCANNING + AUTO CAPTURE
+========================================================= */
+const startQRScanning = () => {
+  if (animationRef.current) {
+    cancelAnimationFrame(animationRef.current);
+  }
+
+  let lastImageData: ImageData | null = null;
+  let stableCount = 0;
+  let qrStableCount = 0;
+
+  const scan = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas || !streamRef.current) return;
+    if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+      animationRef.current = requestAnimationFrame(scan);
+      return;
+    }
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      animationRef.current = requestAnimationFrame(scan);
+      return;
+    }
+
+    const w = 160;
+    const h = 120;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.drawImage(video, 0, 0, w, h);
+
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+
+    // ========== 1. Check if something is in the CENTER (card area) ==========
+    // We only look at the middle part of the frame
+    let variance = 0;
+    let pixelCount = 0;
+    let sum = 0;
+
+    // Center area (where the guide frame is)
+    for (let y = 30; y < 90; y++) {
+      for (let x = 40; x < 120; x++) {
+        const i = (y * w + x) * 4;
+        const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        sum += gray;
+        pixelCount++;
+      }
+    }
+
+    const avg = sum / pixelCount;
+
+    for (let y = 30; y < 90; y++) {
+      for (let x = 40; x < 120; x++) {
+        const i = (y * w + x) * 4;
+        const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        variance += Math.abs(gray - avg);
+      }
+    }
+
+    // If variance is too low → empty background (no card)
+    const hasContent = variance > 2500;   // adjust if needed
+
+    // ========== 2. QR Detection ==========
+    const code = jsQR(data, w, h, { inversionAttempts: "dontInvert" });
+
+    let hasQR = false;
+    if (code?.data) {
+      hasQR = true;
+      if (lastQrRef.current === code.data) {
+        qrStableCount++;
+      } else {
+        lastQrRef.current = code.data;
+        qrStableCount = 1;
+      }
+    } else {
+      qrStableCount = 0;
+      lastQrRef.current = null;
+    }
+
+    // ========== 3. Stability (only if content exists) ==========
+    if (hasContent && lastImageData) {
+      let diff = 0;
+      for (let i = 0; i < data.length; i += 24) {
+        diff += Math.abs(data[i] - lastImageData.data[i]);
+      }
+
+      if (diff < 16000) {
+        stableCount++;
+      } else {
+        stableCount = Math.max(0, stableCount - 2);
+      }
+    } else {
+      // No card in frame → reset
+      stableCount = 0;
+    }
+
+    lastImageData = imageData;
+    setStableQrFrames(hasQR ? qrStableCount : stableCount);
+
+    // ========== 4. Auto Capture ==========
+    const shouldCapture =
+      autoCaptureEnabled &&
+      !isAutoCapturing &&
+      hasContent &&                                 // must have something in center
+      (
+        (hasQR && qrStableCount > 18) ||
+        (!hasQR && stableCount > 50)
+      );
+
+    if (shouldCapture) {
+      setIsAutoCapturing(true);
+      stableCount = 0;
+      qrStableCount = 0;
+
+      setTimeout(() => {
+        capturePhoto();
+        setIsAutoCapturing(false);
+      }, 280);
+
+      return;
+    }
+
+    animationRef.current = requestAnimationFrame(scan);
   };
 
+  animationRef.current = requestAnimationFrame(scan);
+};
 
   /* =========================================================
      CAPTURE PHOTO
@@ -862,6 +1003,18 @@ export default function ScanUploader() {
 
             </div>
           )}
+          {/* Auto capture messages */}
+{isAutoCapturing && (
+  <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-sm font-medium px-4 py-1.5 rounded-full animate-pulse z-20">
+    Card Detected – Capturing...
+  </div>
+)}
+
+{stableQrFrames > 10 && !isAutoCapturing && (
+  <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-green-500 text-white text-sm font-medium px-4 py-1.5 rounded-full z-20">
+    Hold steady...
+  </div>
+)}
 
 
           {/* Guide frame */}
