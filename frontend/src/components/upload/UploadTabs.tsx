@@ -5,14 +5,13 @@ import { Camera, FileText, Link } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ScanUploader from "./ScanUploader";
 import PdfUploader from "./PdfUploader";
-import UrlUploader from "./UrlUploader";
 
-type TabType = "scan" | "pdf" | "url";
+
+type TabType = "scan" | "pdf";
 
 const tabs = [
   { id: "scan" as TabType, label: "Scan", icon: Camera },
   { id: "pdf" as TabType, label: "PDF", icon: FileText },
-  { id: "url" as TabType, label: "URL", icon: Link },
 ];
 
 export default function UploadTabs() {
@@ -48,7 +47,6 @@ export default function UploadTabs() {
       <div className="mt-4">
         {activeTab === "scan" && <ScanUploader />}
         {activeTab === "pdf" && <PdfUploader />}
-        {activeTab === "url" && <UrlUploader />}
       </div>
     </div>
   );

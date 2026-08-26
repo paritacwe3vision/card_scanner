@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   Trash2,
   Building2,
@@ -14,8 +15,12 @@ import {
   ExternalLink,
   FileText,
   QrCode,
+  Download,
+  FileSpreadsheet,      // ← add
+  FileDown,
 } from "lucide-react";
 
+import { jsPDF } from "jspdf";
 import { BusinessCard } from "@/types/card";
 import { getCards, deleteCard } from "@/services/api";
 import { displayValue, formatDate } from "@/lib/utils";
@@ -296,7 +301,252 @@ const filteredCards = cards.filter((card) => {
       label,
     };
   };
+  // =====================================================
+// EXPORT ALL CARDS AS EXCEL
+// =====================================================
+const exportAllAsExcel = () => {
+  const data = cards.map((card, index) => ({
+    "#": index + 1,
+    "Owner Name": card.owner_name || "",
+    Designation: card.designation || "",
+    Company: card.company_name || "",
+    Email: card.email || "",
+    Phone: card.phone || "",
+    Address: card.address || "",
+    GST: card.gst_number || "",
+    Website: card.website_url || "",
+    Instagram: card.instagram_url || "",
+    Facebook: card.facebook_url || "",
+    LinkedIn: card.linkedin_url || "",
+    "Other Details": card.other_details || "",
+    "QR Codes": getQrCodes(card).join(" | "),
+    "Added On": formatDate(card.created_at),
+  }));
 
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Business Cards");
+
+  XLSX.writeFile(workbook, "business_cards.xlsx");
+};
+
+
+// =====================================================
+// EXPORT ALL CARDS AS PDF (with Logos + Company as Heading)
+// =====================================================
+const exportAllAsPdf = async () => {
+  const doc = new jsPDF();
+  const margin = 14;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  let y = 18;
+
+  // Helper: convert image URL to base64
+  const getBase64FromUrl = async (url: string): Promise<string | null> => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  // Title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(30, 30, 30);
+  doc.text("All Business Cards", margin, y);
+  y += 8;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(120);
+  doc.text(
+    `Total: ${cards.length} cards  •  Generated on ${new Date().toLocaleDateString()}`,
+    margin,
+    y
+  );
+  y += 14;
+
+  // Helper to add a field
+  const addField = (label: string, value: string | null | undefined) => {
+    if (!value) return;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(80);
+    doc.text(`${label}:`, margin, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(30);
+    const text = doc.splitTextToSize(String(value), pageWidth - margin - 50);
+    doc.text(text, margin + 32, y);
+    y += text.length * 5 + 2;
+  };
+
+  for (let index = 0; index < cards.length; index++) {
+    const card = cards[index];
+
+    // New page if needed
+    if (y > 245) {
+      doc.addPage();
+      y = 18;
+    }
+
+    // ===== Logo + Company Name =====
+    let logoAdded = false;
+
+    if (card.company_logo) {
+      const base64 = await getBase64FromUrl(card.company_logo);
+      if (base64) {
+        try {
+          const format = base64.includes("image/png") ? "PNG" : "JPEG";
+          doc.addImage(base64, format, margin, y - 4, 14, 14);
+          logoAdded = true;
+        } catch (e) {
+          console.log("Could not add logo", e);
+        }
+      }
+    }
+
+    // Company name as heading
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(0);
+    doc.text(
+      `${index + 1}. ${card.company_name || card.owner_name || "Unknown"}`,
+      logoAdded ? margin + 18 : margin,
+      y + 5
+    );
+    y += 18;
+
+    // Divider
+    doc.setDrawColor(220);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 7;
+
+    // All fields
+    addField("Owner", card.owner_name);
+    addField("Designation", card.designation);
+    addField("Email", card.email);
+    addField("Phone", card.phone);
+    addField("GST", card.gst_number);
+    addField("Address", card.address);
+    addField("Website", card.website_url);
+    addField("Instagram", card.instagram_url);
+    addField("Facebook", card.facebook_url);
+    addField("LinkedIn", card.linkedin_url);
+    addField("Other Details", card.other_details);
+
+    // QR Codes
+    const qrCodes = getQrCodes(card);
+    if (qrCodes.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(80);
+      doc.text("QR Codes:", margin, y);
+      y += 5;
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(30);
+      qrCodes.forEach((qr, i) => {
+        const lines = doc.splitTextToSize(
+          `${i + 1}. ${qr}`,
+          pageWidth - margin - 10
+        );
+        doc.text(lines, margin + 4, y);
+        y += lines.length * 5;
+      });
+      y += 3;
+    }
+
+    y += 12; // space between cards
+  }
+
+  doc.save("all_business_cards.pdf");
+};
+
+// =====================================================
+// DOWNLOAD CARD AS PDF
+// =====================================================
+
+const downloadCardAsPdf = (card: BusinessCard) => {
+  const doc = new jsPDF();
+  const margin = 20;
+  let y = 20;
+
+  const addLine = (label: string, value: string | null | undefined) => {
+    if (!value) return;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(`${label}:`, margin, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(value, margin + 45, y);
+    y += 9;
+  };
+
+  // Title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("Business Card", margin, y);
+  y += 12;
+
+  doc.setDrawColor(200);
+  doc.line(margin, y, 190, y);
+  y += 12;
+
+  // Main details
+  addLine("Owner", card.owner_name);
+  addLine("Designation", card.designation);
+  addLine("Company", card.company_name);
+  addLine("Email", card.email);
+  addLine("Phone", card.phone);
+  addLine("GST", card.gst_number);
+  addLine("Address", card.address);
+  addLine("Website", card.website_url);
+  addLine("Instagram", card.instagram_url);
+  addLine("Facebook", card.facebook_url);
+  addLine("LinkedIn", card.linkedin_url);
+  addLine("Other Details", card.other_details);
+
+  // QR Codes
+  const qrCodes = getQrCodes(card);
+  if (qrCodes.length > 0) {
+    y += 6;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("QR Code(s):", margin, y);
+    y += 8;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    qrCodes.forEach((qr, i) => {
+      doc.text(`${i + 1}. ${qr}`, margin, y);
+      y += 7;
+    });
+  }
+
+  // Footer
+  y += 10;
+  doc.setFontSize(9);
+  doc.setTextColor(150);
+  doc.text(
+    `Generated on ${new Date().toLocaleDateString()}`,
+    margin,
+    y
+  );
+
+  // Download
+  const fileName = `${(card.owner_name || "card")
+    .replace(/[^a-z0-9]/gi, "_")
+    .toLowerCase()}_business_card.pdf`;
+
+  doc.save(fileName);
+};
   // =====================================================
   // LOADING
   // =====================================================
@@ -344,12 +594,13 @@ const filteredCards = cards.filter((card) => {
 
   return (
     <>
-    {/* ========== SEARCH BAR ========== */}
-<div className="mb-5">
-  <div className="relative max-w-md">
+{/* ========== SEARCH + EXPORT ========== */}
+<div className="mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+  {/* Search */}
+  <div className="relative max-w-md w-full">
     <input
       type="text"
-      placeholder="Search by name, company, email, phone..."
+      placeholder="Search by name, company, email, phone, location..."
       value={search}
       onChange={(e) => setSearch(e.target.value)}
       className="w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-10 pr-4 text-sm shadow-sm
@@ -380,12 +631,19 @@ const filteredCards = cards.filter((card) => {
     )}
   </div>
 
-  {search && (
-    <p className="mt-2 text-sm text-gray-500">
-      Showing {filteredCards.length} of {cards.length} cards
-    </p>
-  )}
+  {/* Export Button */}
+  <ExportDropdown
+    onPdf={exportAllAsPdf}
+    onExcel={exportAllAsExcel}
+    disabled={cards.length === 0}
+  />
 </div>
+
+{search && (
+  <p className="mb-4 text-sm text-gray-500">
+    Showing {filteredCards.length} of {cards.length} cards
+  </p>
+)}
       {/* =================================================
           TABLE
       ================================================= */}
@@ -428,7 +686,7 @@ const filteredCards = cards.filter((card) => {
                 Added
               </th>
 
-              <th className="w-[8%] px-2 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">
+              <th className="w-[12%] px-2 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">
                 Actions
               </th>
 
@@ -589,42 +847,39 @@ const filteredCards = cards.filter((card) => {
                 </td>
 
                 {/* ACTIONS */}
+<td className="px-2 py-5">
+  <div className="flex items-center justify-center gap-1">
 
-                <td className="px-2 py-5">
+    {/* VIEW */}
+    <button
+      onClick={() => setSelectedCard(card)}
+      className="h-9 w-9 shrink-0 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+      title="View details"
+    >
+      <Eye className="h-4 w-4" />
+    </button>
 
-                  <div className="flex items-center justify-center gap-1">
+    {/* DOWNLOAD PDF */}
+    <button
+      onClick={() => downloadCardAsPdf(card)}
+      className="h-9 w-9 shrink-0 flex items-center justify-center text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+      title="Download as PDF"
+    >
+      <Download className="h-4 w-4" />
+    </button>
 
-                    {/* VIEW */}
+    {/* DELETE */}
+    <button
+      onClick={() => handleDelete(card.id)}
+      disabled={deletingId === card.id}
+      className="h-9 w-9 shrink-0 flex items-center justify-center text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+      title="Delete card"
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
 
-                    <button
-                      onClick={() =>
-                        setSelectedCard(card)
-                      }
-                      className="h-9 w-9 shrink-0 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                      title="View details"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </button>
-
-                    {/* DELETE */}
-
-                    <button
-                      onClick={() =>
-                        handleDelete(card.id)
-                      }
-                      disabled={
-                        deletingId === card.id
-                      }
-                      className="h-9 w-9 shrink-0 flex items-center justify-center text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                      title="Delete card"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-
-                  </div>
-
-                </td>
-
+  </div>
+</td>
               </tr>
             ))}
 
@@ -1085,6 +1340,65 @@ const filteredCards = cards.filter((card) => {
 /* =====================================================
    DETAIL ITEM
 ===================================================== */
+/* =====================================================
+   EXPORT DROPDOWN
+===================================================== */
+function ExportDropdown({
+  onPdf,
+  onExcel,
+  disabled,
+}: {
+  onPdf: () => void;
+  onExcel: () => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        className="flex items-center gap-2"
+      >
+        <FileDown className="h-4 w-4" />
+        Export
+      </Button>
+
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setOpen(false)}
+          />
+          <div className="absolute right-0 mt-2 w-48 rounded-xl border border-gray-200 bg-white shadow-lg z-20 overflow-hidden">
+            <button
+              onClick={() => {
+                onPdf();
+                setOpen(false);
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <FileText className="h-4 w-4 text-red-500" />
+              Export as PDF
+            </button>
+            <button
+              onClick={() => {
+                onExcel();
+                setOpen(false);
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 border-t border-gray-100"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-green-600" />
+              Export as Excel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function DetailItem({
   icon,

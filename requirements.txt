@@ -25,3 +25,7 @@ playwright
 # PDF processing
 PyMuPDF
 Pillow
+jspdf
+xlsx
+
+pyzbar
