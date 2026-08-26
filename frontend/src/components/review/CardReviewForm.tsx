@@ -6,6 +6,7 @@ import {
   Building2,
   Save,
   ArrowLeft,
+  ArrowRight,
   QrCode,
   MapPin,
   ExternalLink,
@@ -21,10 +22,32 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 
 export default function CardReviewForm() {
   const router = useRouter();
-  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
-  const [pendingSaveData, setPendingSaveData] = useState<any>(null);
 
-  const [formData, setFormData] = useState<ExtractedCard>({
+  // ============================================================
+  // MULTIPLE CARD STATE
+  // ============================================================
+
+  const [cards, setCards] = useState<ExtractedCard[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  // ============================================================
+  // DUPLICATE CONFIRMATION
+  // ============================================================
+
+  const [showDuplicateConfirm, setShowDuplicateConfirm] =
+    useState(false);
+
+  const [pendingSaveData, setPendingSaveData] =
+    useState<any>(null);
+
+  const [pendingNextIndex, setPendingNextIndex] =
+    useState<number | null>(null);
+
+  // ============================================================
+  // CURRENT FORM DATA
+  // ============================================================
+
+  const createEmptyCard = (): ExtractedCard => ({
     owner_name: "",
     designation: "",
     company_name: "",
@@ -52,211 +75,802 @@ export default function CardReviewForm() {
     other_details: "",
   });
 
+  const [formData, setFormData] =
+    useState<ExtractedCard>(createEmptyCard());
+
+  // ============================================================
+  // UI STATE
+  // ============================================================
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
 
-  // --------------------------------------------------
-  // LOAD EXTRACTED CARD FROM SESSION STORAGE
-  // --------------------------------------------------
+  // ============================================================
+  // NORMALIZE CARD
+  // ============================================================
+
+  const normalizeCard = (
+    card: any
+  ): ExtractedCard => {
+    let qrCodes: string[] = [];
+
+    // ----------------------------------------------------------
+    // NEW FORMAT
+    // qr_codes: ["QR1", "QR2"]
+    // ----------------------------------------------------------
+
+    if (Array.isArray(card?.qr_codes)) {
+      qrCodes = card.qr_codes
+        .filter(
+          (qr: unknown): qr is string =>
+            typeof qr === "string" &&
+            qr.trim().length > 0
+        )
+        .map((qr: string) => qr.trim());
+    }
+
+    // ----------------------------------------------------------
+    // OLD FORMAT
+    // qr_raw: "QR1 ||| QR2"
+    // ----------------------------------------------------------
+
+    if (
+      qrCodes.length === 0 &&
+      typeof card?.qr_raw === "string" &&
+      card.qr_raw.trim()
+    ) {
+      qrCodes = card.qr_raw
+        .split(" ||| ")
+        .map((qr: string) => qr.trim())
+        .filter(Boolean);
+    }
+
+    // ----------------------------------------------------------
+    // REMOVE DUPLICATES
+    // ----------------------------------------------------------
+
+    qrCodes = Array.from(
+      new Set(qrCodes)
+    );
+
+    return {
+      owner_name:
+        card?.owner_name ?? "",
+
+      designation:
+        card?.designation ?? "",
+
+      company_name:
+        card?.company_name ?? "",
+
+      address:
+        card?.address ?? "",
+
+      email:
+        card?.email ?? "",
+
+      phone:
+        card?.phone ?? "",
+
+      gst_number:
+        card?.gst_number ?? "",
+
+      company_logo:
+        card?.company_logo ?? null,
+
+      website_url:
+        card?.website_url ?? "",
+
+      instagram_url:
+        card?.instagram_url ?? "",
+
+      facebook_url:
+        card?.facebook_url ?? "",
+
+      linkedin_url:
+        card?.linkedin_url ?? "",
+
+      front_image_url:
+        card?.front_image_url ?? null,
+
+      back_image_url:
+        card?.back_image_url ?? null,
+
+      source_type:
+        card?.source_type ?? "scan",
+
+      original_file_url:
+        card?.original_file_url ?? null,
+
+      qr_raw:
+        qrCodes.length > 0
+          ? qrCodes.join(" ||| ")
+          : null,
+
+      qr_codes:
+        qrCodes,
+
+      other_details:
+        card?.other_details ?? "",
+    };
+  };
+
+  // ============================================================
+  // LOAD EXTRACTED CARDS
+  // ============================================================
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("extractedCard");
+    const loadExtractedCards = () => {
+      try {
+        // ======================================================
+        // CHECK MULTIPLE CARDS FIRST
+        // ======================================================
 
-    if (!stored) {
-      router.push("/");
-      return;
-    }
+        const storedCards =
+          sessionStorage.getItem(
+            "extractedCards"
+          );
 
-    try {
-      const card = JSON.parse(stored);
+        if (storedCards) {
+          const parsedCards =
+            JSON.parse(storedCards);
 
-      console.log("Extracted card:", card);
-      console.log("Extracted QR codes:", card.qr_codes);
+          if (
+            Array.isArray(parsedCards) &&
+            parsedCards.length > 0
+          ) {
+            const normalizedCards =
+              parsedCards.map(
+                normalizeCard
+              );
 
-      /*
-       * Support both:
-       *
-       * 1. New format:
-       *    qr_codes: ["QR1", "QR2"]
-       *
-       * 2. Old format:
-       *    qr_raw: "QR1"
-       *
-       * This keeps backward compatibility.
-       */
+            console.log(
+              "========================================"
+            );
 
-      const qrCodes: string[] = Array.isArray(card.qr_codes)
-        ? card.qr_codes.filter(
-            (qr: unknown): qr is string =>
-              typeof qr === "string" && qr.trim().length > 0
-          )
-        : card.qr_raw
-          ? [card.qr_raw]
-          : [];
+            console.log(
+              "MULTIPLE EXTRACTED CARDS:",
+              normalizedCards
+            );
 
-      setFormData({
-        owner_name: card.owner_name ?? "",
-        designation: card.designation ?? "",
-        company_name: card.company_name ?? "",
-        address: card.address ?? "",
-        email: card.email ?? "",
-        phone: card.phone ?? "",
-        gst_number: card.gst_number ?? "",
+            console.log(
+              "TOTAL CARDS:",
+              normalizedCards.length
+            );
 
-        company_logo: card.company_logo ?? null,
+            console.log(
+              "========================================"
+            );
 
-        website_url: card.website_url ?? "",
-        instagram_url: card.instagram_url ?? "",
-        facebook_url: card.facebook_url ?? "",
-        linkedin_url: card.linkedin_url ?? "",
+            setCards(
+              normalizedCards
+            );
 
-        front_image_url: card.front_image_url ?? null,
-        back_image_url: card.back_image_url ?? null,
+            setCurrentIndex(0);
 
-        source_type: card.source_type ?? "scan",
-        original_file_url: card.original_file_url ?? null,
+            setFormData(
+              normalizedCards[0]
+            );
 
-        /*
-         * Keep the first QR in qr_raw for backward compatibility.
-         */
-        qr_raw: card.qr_raw ?? qrCodes[0] ?? null,
+            setIsReady(true);
 
-        /*
-         * IMPORTANT:
-         * Store ALL QR codes.
-         */
-        qr_codes: qrCodes,
+            return;
+          }
+        }
 
-        other_details: card.other_details ?? "",
-      });
+        // ======================================================
+        // FALLBACK TO SINGLE CARD
+        // ======================================================
 
-      setIsReady(true);
-    } catch (err) {
-      console.error(err);
+        const storedCard =
+          sessionStorage.getItem(
+            "extractedCard"
+          );
 
-      setError("Invalid extracted card data");
-      setIsReady(true);
-    }
+        if (!storedCard) {
+          router.push("/");
+          return;
+        }
+
+        const parsedCard =
+          JSON.parse(storedCard);
+
+        const normalizedCard =
+          normalizeCard(parsedCard);
+
+        console.log(
+          "SINGLE EXTRACTED CARD:",
+          normalizedCard
+        );
+
+        setCards([
+          normalizedCard,
+        ]);
+
+        setCurrentIndex(0);
+
+        setFormData(
+          normalizedCard
+        );
+
+        setIsReady(true);
+      } catch (err) {
+        console.error(
+          "LOAD EXTRACTED CARDS ERROR:",
+          err
+        );
+
+        setError(
+          "Invalid extracted card data"
+        );
+
+        setIsReady(true);
+      }
+    };
+
+    loadExtractedCards();
   }, [router]);
 
-  // --------------------------------------------------
+  // ============================================================
   // HANDLE FORM CHANGE
-  // --------------------------------------------------
+  // ============================================================
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement
+    >
   ) => {
-    const { name, value } = e.target;
+    const {
+      name,
+      value,
+    } = e.target;
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData(
+      (previous) => ({
+        ...previous,
+        [name]: value,
+      })
+    );
   };
 
-  // --------------------------------------------------
-  // SAVE CARD
-  // --------------------------------------------------
+  // ============================================================
+  // PREPARE SAVE DATA
+  // ============================================================
+
+  const prepareSaveData = (
+    card: ExtractedCard
+  ) => {
+    // ----------------------------------------------------------
+    // CLEAN QR CODES
+    // ----------------------------------------------------------
+
+    const qrCodes: string[] =
+      Array.isArray(card.qr_codes)
+        ? card.qr_codes
+            .filter(
+              (
+                qr
+              ): qr is string =>
+                typeof qr ===
+                  "string" &&
+                qr.trim().length >
+                  0
+            )
+            .map(
+              (qr) =>
+                qr.trim()
+            )
+        : [];
+
+    // ----------------------------------------------------------
+    // REMOVE DUPLICATES
+    // ----------------------------------------------------------
+
+    const uniqueQrCodes =
+      Array.from(
+        new Set(qrCodes)
+      );
+
+    // ----------------------------------------------------------
+    // CREATE qr_raw
+    // ----------------------------------------------------------
+
+    const joinedQrRaw =
+      uniqueQrCodes.length > 0
+        ? uniqueQrCodes.join(
+            " ||| "
+          )
+        : null;
+
+    // ----------------------------------------------------------
+    // RETURN COMPLETE CARD
+    // ----------------------------------------------------------
+
+    return {
+      owner_name:
+        card.owner_name?.trim() ||
+        "Unknown",
+
+      designation:
+        card.designation?.trim() ||
+        null,
+
+      company_name:
+        card.company_name?.trim() ||
+        null,
+
+      address:
+        card.address?.trim() ||
+        null,
+
+      email:
+        card.email?.trim() ||
+        null,
+
+      phone:
+        card.phone?.trim() ||
+        null,
+
+      gst_number:
+        card.gst_number?.trim() ||
+        null,
+
+      company_logo:
+        card.company_logo ||
+        null,
+
+      website_url:
+        card.website_url?.trim() ||
+        null,
+
+      instagram_url:
+        card.instagram_url?.trim() ||
+        null,
+
+      facebook_url:
+        card.facebook_url?.trim() ||
+        null,
+
+      linkedin_url:
+        card.linkedin_url?.trim() ||
+        null,
+
+      front_image_url:
+        card.front_image_url ||
+        null,
+
+      back_image_url:
+        card.back_image_url ||
+        null,
+
+      source_type:
+        card.source_type ||
+        "scan",
+
+      original_file_url:
+        card.original_file_url ||
+        null,
+
+      other_details:
+        card.other_details?.trim() ||
+        null,
+
+      // --------------------------------------------------------
+      // IMPORTANT
+      // SAVE ALL QR CODES
+      // --------------------------------------------------------
+
+      qr_raw:
+        joinedQrRaw,
+
+      qr_codes:
+        uniqueQrCodes,
+    };
+  };
+
+  // ============================================================
+  // SAVE CARD TO BACKEND
+  // ============================================================
+
+  const saveCardToBackend = async (
+    dataToSave: any
+  ) => {
+    console.log(
+      "========================================"
+    );
+
+    console.log(
+      "CARD DATA BEING SAVED:"
+    );
+
+    console.log(
+      dataToSave
+    );
+
+    console.log(
+      "QR CODES:",
+      dataToSave.qr_codes
+    );
+
+    console.log(
+      "QR COUNT:",
+      dataToSave.qr_codes?.length ?? 0
+    );
+
+    console.log(
+      "========================================"
+    );
+
+    const response =
+      await saveCard(
+        dataToSave as any
+      );
+
+    if (!response.success) {
+      throw new Error(
+        response.message ||
+          "Failed to save card"
+      );
+    }
+
+    return response;
+  };
+
+  // ============================================================
+  // CHECK DUPLICATE COMPANY
+  // ============================================================
+
+  const checkDuplicateCompany = async (
+    dataToSave: any
+  ) => {
+    const companyName =
+      dataToSave.company_name
+        ?.trim() ||
+      null;
+
+    // ----------------------------------------------------------
+    // No company name
+    // ----------------------------------------------------------
+
+    if (!companyName) {
+      return false;
+    }
+
+    // ----------------------------------------------------------
+    // Get existing cards
+    // ----------------------------------------------------------
+
+    const existing =
+      await getCards();
+
+    if (
+      !existing.success ||
+      !existing.data
+    ) {
+      return false;
+    }
+
+    // ----------------------------------------------------------
+    // Compare company names
+    // ----------------------------------------------------------
+
+    const isDuplicate =
+      existing.data.some(
+        (card: any) =>
+          card.company_name &&
+          card.company_name
+            .toLowerCase()
+            .trim() ===
+            companyName.toLowerCase()
+    );
+
+    return isDuplicate;
+  };
+
+  // ============================================================
+  // MOVE TO NEXT CARD
+  // ============================================================
+
+  const moveToNextCard = (
+    nextIndex: number
+  ) => {
+    if (
+      nextIndex >=
+      cards.length
+    ) {
+      return;
+    }
+
+    setCurrentIndex(
+      nextIndex
+    );
+
+    setFormData(
+      cards[nextIndex]
+    );
+
+    setError(null);
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
+
+  // ============================================================
+  // SAVE CURRENT CARD
+  // ============================================================
+
   const handleSave = async () => {
+    if (isLoading) {
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
-  
+
     try {
-      // Clean QR list
-      const qrCodes = Array.isArray(formData.qr_codes)
-        ? formData.qr_codes.filter(
-            (qr): qr is string => typeof qr === "string" && qr.trim().length > 0
-          )
-        : [];
-  
-      const joinedQrRaw = qrCodes.length > 0 ? qrCodes.join(" ||| ") : null;
-  
-      const dataToSave = {
-        owner_name: formData.owner_name?.trim() || "Unknown",
-        designation: formData.designation?.trim() || null,
-        company_name: formData.company_name?.trim() || null,
-        address: formData.address?.trim() || null,
-        email: formData.email?.trim() || null,
-        phone: formData.phone?.trim() || null,
-        gst_number: formData.gst_number?.trim() || null,
-        company_logo: formData.company_logo || null,
-        website_url: formData.website_url?.trim() || null,
-        instagram_url: formData.instagram_url?.trim() || null,
-        facebook_url: formData.facebook_url?.trim() || null,
-        linkedin_url: formData.linkedin_url?.trim() || null,
-        other_details: formData.other_details?.trim() || null,
-        qr_raw: joinedQrRaw,
-      };
-  
-// ============================================
-// CHECK FOR DUPLICATE COMPANY NAME
-// ============================================
-const companyName = dataToSave.company_name?.trim() || null;
+      // ======================================================
+      // IMPORTANT:
+      // Store CURRENT EDITED FORM in cards array
+      // ======================================================
 
-if (companyName) {
-  const existing = await getCards();
+      const updatedCards =
+        [...cards];
 
-  if (existing.success && existing.data) {
-    const isDuplicate = existing.data.some(
-      (card: any) =>
-        card.company_name &&
-        card.company_name.toLowerCase().trim() ===
-          companyName.toLowerCase()
-    );
+      updatedCards[currentIndex] =
+        {
+          ...formData,
+        };
 
-    if (isDuplicate) {
-      // Show confirmation popup
-      setPendingSaveData(dataToSave);
-      setShowDuplicateConfirm(true);
-      setIsLoading(false);
-      return;
-    }
-  }
-}
+      setCards(
+        updatedCards
+      );
 
-// No duplicate → save directly
-await performSave(dataToSave);
+      // ======================================================
+      // PREPARE DATA
+      // ======================================================
+
+      const dataToSave =
+        prepareSaveData(
+          formData
+        );
+
+      // ======================================================
+      // DUPLICATE CHECK
+      // ======================================================
+
+      const isDuplicate =
+        await checkDuplicateCompany(
+          dataToSave
+        );
+
+      if (isDuplicate) {
+        console.log(
+          "Duplicate company detected:",
+          dataToSave.company_name
+        );
+
+        setPendingSaveData(
+          dataToSave
+        );
+
+        setPendingNextIndex(
+          currentIndex <
+            cards.length - 1
+            ? currentIndex + 1
+            : null
+        );
+
+        setShowDuplicateConfirm(
+          true
+        );
+
+        setIsLoading(false);
+
+        return;
+      }
+
+      // ======================================================
+      // SAVE DIRECTLY
+      // ======================================================
+
+      await performSave(
+        dataToSave
+      );
     } catch (err: any) {
-      console.error("SAVE CARD ERROR:", err);
-      setError(err?.message || "Something went wrong while saving the card");
+      console.error(
+        "SAVE CARD ERROR:",
+        err
+      );
+
+      setError(
+        err?.message ||
+          "Something went wrong while saving the card"
+      );
+
       setIsLoading(false);
     }
   };
-  
-  // Actual save function
-  const performSave = async (dataToSave: any) => {
+
+  // ============================================================
+  // PERFORM ACTUAL SAVE
+  // ============================================================
+
+  const performSave = async (
+    dataToSave: any
+  ) => {
+    if (!dataToSave) {
+      setError(
+        "No card data available to save."
+      );
+
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
     try {
-      setIsLoading(true);
-      const response = await saveCard(dataToSave as any);
-  
-      if (response.success) {
-        sessionStorage.removeItem("extractedCard");
-        router.push("/cards");
-      } else {
-        setError(response.message || "Failed to save card");
+      // ======================================================
+      // SAVE TO BACKEND
+      // ======================================================
+
+      await saveCardToBackend(
+        dataToSave
+      );
+
+      console.log(
+        "CARD SAVED SUCCESSFULLY"
+      );
+
+      // ======================================================
+      // CHECK FOR MORE CARDS
+      // ======================================================
+
+      const nextIndex =
+        pendingNextIndex !== null
+          ? pendingNextIndex
+          : currentIndex <
+              cards.length - 1
+            ? currentIndex + 1
+            : null;
+
+      // ======================================================
+      // MORE CARDS
+      // ======================================================
+
+      if (
+        nextIndex !== null &&
+        nextIndex < cards.length
+      ) {
+        setShowDuplicateConfirm(
+          false
+        );
+
+        setPendingSaveData(
+          null
+        );
+
+        setPendingNextIndex(
+          null
+        );
+
+        moveToNextCard(
+          nextIndex
+        );
+
+        return;
       }
+
+      // ======================================================
+      // ALL CARDS SAVED
+      // ======================================================
+
+      sessionStorage.removeItem(
+        "extractedCard"
+      );
+
+      sessionStorage.removeItem(
+        "extractedCards"
+      );
+
+      router.push(
+        "/cards"
+      );
     } catch (err: any) {
-      setError(err?.message || "Something went wrong while saving the card");
+      console.error(
+        "PERFORM SAVE ERROR:",
+        err
+      );
+
+      setError(
+        err?.message ||
+          "Something went wrong while saving the card"
+      );
     } finally {
       setIsLoading(false);
-      setShowDuplicateConfirm(false);
-      setPendingSaveData(null);
+
+      setShowDuplicateConfirm(
+        false
+      );
+
+      setPendingSaveData(
+        null
+      );
+
+      setPendingNextIndex(
+        null
+      );
     }
   };
 
-  // --------------------------------------------------
-  // GOOGLE MAPS
-  // --------------------------------------------------
+  // ============================================================
+  // PREVIOUS CARD
+  // ============================================================
 
-  const openMap = () => {
-    if (!formData.address) {
+  const handlePrevious = () => {
+    if (
+      currentIndex <= 0 ||
+      isLoading
+    ) {
       return;
     }
 
-    const encodedAddress = encodeURIComponent(
-      formData.address
+    // ----------------------------------------------------------
+    // IMPORTANT:
+    // Save current edited form in local state before moving.
+    // ----------------------------------------------------------
+
+    const updatedCards =
+      [...cards];
+
+    updatedCards[currentIndex] =
+      {
+        ...formData,
+      };
+
+    setCards(
+      updatedCards
     );
+
+    const previousIndex =
+      currentIndex - 1;
+
+    setCurrentIndex(
+      previousIndex
+    );
+
+    setFormData(
+      updatedCards[
+        previousIndex
+      ]
+    );
+
+    setError(null);
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
+
+  // ============================================================
+  // GOOGLE MAPS
+  // ============================================================
+
+  const openMap = () => {
+    if (
+      !formData.address
+    ) {
+      return;
+    }
+
+    const encodedAddress =
+      encodeURIComponent(
+        formData.address
+      );
 
     window.open(
       `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`,
@@ -264,23 +878,42 @@ await performSave(dataToSave);
     );
   };
 
-  // --------------------------------------------------
+  // ============================================================
   // QR DATA
-  // --------------------------------------------------
+  // ============================================================
 
-  const qrCodes =
-    Array.isArray(formData.qr_codes) &&
-    formData.qr_codes.length > 0
-      ? formData.qr_codes
-      : formData.qr_raw
-        ? [formData.qr_raw]
+  const qrCodes: string[] =
+    Array.isArray(
+      formData.qr_codes
+    )
+      ? formData.qr_codes.filter(
+          (
+            qr
+          ): qr is string =>
+            typeof qr ===
+              "string" &&
+            qr.trim().length >
+              0
+        )
+      : typeof formData.qr_raw ===
+          "string"
+        ? formData.qr_raw
+            .split(
+              " ||| "
+            )
+            .map(
+              (qr) =>
+                qr.trim()
+            )
+            .filter(Boolean)
         : [];
 
-  const qrCount = qrCodes.length;
+  const qrCount =
+    qrCodes.length;
 
-  // --------------------------------------------------
+  // ============================================================
   // LOADING
-  // --------------------------------------------------
+  // ============================================================
 
   if (!isReady) {
     return (
@@ -293,49 +926,201 @@ await performSave(dataToSave);
     );
   }
 
-  // --------------------------------------------------
+  // ============================================================
   // PAGE
-  // --------------------------------------------------
+  // ============================================================
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 sm:p-8">
 
-        {/* ============================================
+        {/* =====================================================
             TITLE
-        ============================================ */}
+        ===================================================== */}
 
         <div className="mb-8">
-          <h2 className="text-2xl font-semibold text-gray-900">
-            Review Business Card Details
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
 
-          <p className="mt-1 text-sm text-gray-500">
-            Review the scanned card and automatically extracted
-            information before saving.
-          </p>
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900">
+                Review Extracted Details
+              </h2>
+
+              <p className="mt-1 text-sm text-gray-500">
+                Review the scanned card information before saving.
+              </p>
+            </div>
+
+            {/* =================================================
+                CARD COUNTER
+            ================================================= */}
+
+            {cards.length > 1 && (
+              <div className="flex items-center gap-2 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2">
+
+                <span className="text-sm font-medium text-primary-700">
+                  PDF / Card
+                </span>
+
+                <span className="text-sm font-bold text-primary-900">
+                  {currentIndex + 1}
+                </span>
+
+                <span className="text-sm text-primary-600">
+                  of
+                </span>
+
+                <span className="text-sm font-bold text-primary-900">
+                  {cards.length}
+                </span>
+
+              </div>
+            )}
+
+          </div>
         </div>
 
-        {/* ============================================
+        {/* =====================================================
+            MULTIPLE CARD NAVIGATION
+        ===================================================== */}
+
+        {cards.length > 1 && (
+          <div className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-4">
+
+            <div className="flex items-center justify-between gap-3">
+
+              <Button
+                variant="outline"
+                onClick={
+                  handlePrevious
+                }
+                disabled={
+                  currentIndex ===
+                    0 ||
+                  isLoading
+                }
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+
+                Previous
+              </Button>
+
+              <div className="text-center">
+
+                <p className="text-sm font-semibold text-gray-800">
+                  Card{" "}
+                  {currentIndex +
+                    1}
+                </p>
+
+                <p className="text-xs text-gray-500 mt-1">
+                  {currentIndex ===
+                  cards.length - 1
+                    ? "Last card"
+                    : "Review this card and continue"}
+                </p>
+
+              </div>
+
+              {/* ------------------------------------------------
+                  NAVIGATION NEXT
+                  ------------------------------------------------ */}
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (
+                    currentIndex <
+                    cards.length - 1
+                  ) {
+                    // Move without saving.
+                    // The actual Save & Next button
+                    // below performs the DB save.
+                    const updatedCards =
+                      [...cards];
+
+                    updatedCards[
+                      currentIndex
+                    ] = {
+                      ...formData,
+                    };
+
+                    setCards(
+                      updatedCards
+                    );
+
+                    const nextIndex =
+                      currentIndex +
+                      1;
+
+                    setCurrentIndex(
+                      nextIndex
+                    );
+
+                    setFormData(
+                      updatedCards[
+                        nextIndex
+                      ]
+                    );
+
+                    setError(
+                      null
+                    );
+
+                    window.scrollTo(
+                      {
+                        top: 0,
+                        behavior:
+                          "smooth",
+                      }
+                    );
+                  }
+                }}
+                disabled={
+                  currentIndex >=
+                    cards.length -
+                      1 ||
+                  isLoading
+                }
+              >
+                Next
+
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+
+            </div>
+
+          </div>
+        )}
+
+        {/* =====================================================
             SCANNED CARD IMAGES
-        ============================================ */}
+        ===================================================== */}
 
         <div className="mb-8">
+
           <div className="flex items-center gap-2 mb-4">
+
             <ImageIcon className="h-5 w-5 text-primary-600" />
 
             <h3 className="text-lg font-semibold text-gray-900">
               Scanned Business Card
             </h3>
+
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-            {/* FRONT SIDE */}
+            {/* =================================================
+                FRONT
+            ================================================= */}
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+
               <div className="flex items-center justify-between mb-3">
+
                 <div>
+
                   <p className="font-medium text-gray-800">
                     Front Side
                   </p>
@@ -343,6 +1128,7 @@ await performSave(dataToSave);
                   <p className="text-xs text-gray-500">
                     Scanned card front
                   </p>
+
                 </div>
 
                 {formData.front_image_url && (
@@ -350,32 +1136,45 @@ await performSave(dataToSave);
                     Scanned
                   </span>
                 )}
+
               </div>
 
               {formData.front_image_url ? (
                 <div className="rounded-lg overflow-hidden border border-gray-200 bg-white">
+
                   <img
-                    src={formData.front_image_url}
+                    src={
+                      formData.front_image_url
+                    }
                     alt="Business card front side"
                     className="w-full h-64 object-contain"
                   />
+
                 </div>
               ) : (
                 <div className="h-64 rounded-lg border border-dashed border-gray-300 bg-white flex flex-col items-center justify-center">
+
                   <ImageIcon className="h-10 w-10 text-gray-400 mb-2" />
 
                   <p className="text-sm text-gray-500">
                     Front side not available
                   </p>
+
                 </div>
               )}
+
             </div>
 
-            {/* BACK SIDE */}
+            {/* =================================================
+                BACK
+            ================================================= */}
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+
               <div className="flex items-center justify-between mb-3">
+
                 <div>
+
                   <p className="font-medium text-gray-800">
                     Back Side
                   </p>
@@ -383,6 +1182,7 @@ await performSave(dataToSave);
                   <p className="text-xs text-gray-500">
                     Scanned card back
                   </p>
+
                 </div>
 
                 {formData.back_image_url && (
@@ -390,52 +1190,67 @@ await performSave(dataToSave);
                     Scanned
                   </span>
                 )}
+
               </div>
 
               {formData.back_image_url ? (
                 <div className="rounded-lg overflow-hidden border border-gray-200 bg-white">
+
                   <img
-                    src={formData.back_image_url}
+                    src={
+                      formData.back_image_url
+                    }
                     alt="Business card back side"
                     className="w-full h-64 object-contain"
                   />
+
                 </div>
               ) : (
                 <div className="h-64 rounded-lg border border-dashed border-gray-300 bg-white flex flex-col items-center justify-center">
+
                   <ImageIcon className="h-10 w-10 text-gray-400 mb-2" />
 
                   <p className="text-sm text-gray-500">
                     Back side not available
                   </p>
+
                 </div>
               )}
+
             </div>
 
           </div>
+
         </div>
 
-        {/* ============================================
-            LOGO + QR
-        ============================================ */}
+        {/* =====================================================
+            LOGO + QR SUMMARY
+        ===================================================== */}
 
         <div className="flex flex-wrap gap-6 mb-8">
 
           {/* COMPANY LOGO */}
 
           <div className="flex items-center gap-4">
+
             {formData.company_logo ? (
               <img
-                src={formData.company_logo}
+                src={
+                  formData.company_logo
+                }
                 alt="Company Logo"
                 className="h-20 w-20 rounded-xl object-contain border border-gray-200 bg-white"
               />
             ) : (
               <div className="h-20 w-20 rounded-xl bg-gray-100 flex items-center justify-center">
+
                 <Building2 className="h-8 w-8 text-gray-400" />
+
               </div>
             )}
 
             <div>
+
               <p className="text-sm font-medium text-gray-700">
                 Company Logo
               </p>
@@ -445,12 +1260,15 @@ await performSave(dataToSave);
                   ? "Detected"
                   : "Not found"}
               </p>
+
             </div>
+
           </div>
 
-          {/* QR CODE SUMMARY */}
+          {/* QR SUMMARY */}
 
           <div className="flex items-center gap-4">
+
             <div
               className={`h-20 w-20 rounded-xl flex items-center justify-center ${
                 qrCount > 0
@@ -458,6 +1276,7 @@ await performSave(dataToSave);
                   : "bg-gray-100"
               }`}
             >
+
               <QrCode
                 className={`h-8 w-8 ${
                   qrCount > 0
@@ -465,34 +1284,48 @@ await performSave(dataToSave);
                     : "text-gray-400"
                 }`}
               />
+
             </div>
 
             <div>
+
               <p className="text-sm font-medium text-gray-700">
-                QR Code{qrCount > 1 ? "s" : ""}
+
+                QR Code
+                {qrCount > 1
+                  ? "s"
+                  : ""}
+
               </p>
 
               <p className="text-xs text-gray-500">
+
                 {qrCount > 0
                   ? `${qrCount} detected`
                   : "Not found"}
+
               </p>
+
             </div>
+
           </div>
+
         </div>
 
-        {/* ============================================
+        {/* =====================================================
             EXTRACTED DETAILS
-        ============================================ */}
+        ===================================================== */}
 
         <div className="mb-4">
+
           <h3 className="text-lg font-semibold text-gray-900">
             Extracted Information
           </h3>
 
           <p className="text-sm text-gray-500 mt-1">
-            Information detected from the scanned business card.
+            Information detected from this business card.
           </p>
+
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -503,8 +1336,13 @@ await performSave(dataToSave);
             id="owner_name"
             name="owner_name"
             label="Owner / Person Name"
-            value={formData.owner_name || ""}
-            onChange={handleChange}
+            value={
+              formData.owner_name ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="Rahul Patel"
           />
 
@@ -514,8 +1352,13 @@ await performSave(dataToSave);
             id="company_name"
             name="company_name"
             label="Company Name"
-            value={formData.company_name || ""}
-            onChange={handleChange}
+            value={
+              formData.company_name ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="ABC Technologies"
           />
 
@@ -525,8 +1368,13 @@ await performSave(dataToSave);
             id="designation"
             name="designation"
             label="Designation"
-            value={formData.designation || ""}
-            onChange={handleChange}
+            value={
+              formData.designation ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="Founder & CEO"
           />
 
@@ -536,8 +1384,13 @@ await performSave(dataToSave);
             id="phone"
             name="phone"
             label="Phone Number"
-            value={formData.phone || ""}
-            onChange={handleChange}
+            value={
+              formData.phone ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="+91 9876543210"
           />
 
@@ -548,8 +1401,13 @@ await performSave(dataToSave);
             name="email"
             type="email"
             label="Email"
-            value={formData.email || ""}
-            onChange={handleChange}
+            value={
+              formData.email ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="contact@company.com"
           />
 
@@ -559,8 +1417,13 @@ await performSave(dataToSave);
             id="website_url"
             name="website_url"
             label="Website"
-            value={formData.website_url || ""}
-            onChange={handleChange}
+            value={
+              formData.website_url ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="https://company.com"
           />
 
@@ -570,8 +1433,13 @@ await performSave(dataToSave);
             id="instagram_url"
             name="instagram_url"
             label="Instagram"
-            value={formData.instagram_url || ""}
-            onChange={handleChange}
+            value={
+              formData.instagram_url ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="@username or full link"
           />
 
@@ -581,8 +1449,13 @@ await performSave(dataToSave);
             id="facebook_url"
             name="facebook_url"
             label="Facebook"
-            value={formData.facebook_url || ""}
-            onChange={handleChange}
+            value={
+              formData.facebook_url ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="Facebook profile / page link"
           />
 
@@ -592,8 +1465,13 @@ await performSave(dataToSave);
             id="linkedin_url"
             name="linkedin_url"
             label="LinkedIn"
-            value={formData.linkedin_url || ""}
-            onChange={handleChange}
+            value={
+              formData.linkedin_url ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="LinkedIn profile link"
           />
 
@@ -603,16 +1481,21 @@ await performSave(dataToSave);
             id="gst_number"
             name="gst_number"
             label="GST Number"
-            value={formData.gst_number || ""}
-            onChange={handleChange}
+            value={
+              formData.gst_number ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="24ABCDE1234F1Z5"
           />
 
         </div>
 
-        {/* ============================================
-            ADDRESS / LOCATION
-        ============================================ */}
+        {/* =====================================================
+            ADDRESS
+        ===================================================== */}
 
         <div className="mt-6">
 
@@ -622,20 +1505,26 @@ await performSave(dataToSave);
               htmlFor="address"
               className="flex items-center gap-2 text-sm font-medium text-gray-700"
             >
+
               <MapPin className="h-4 w-4 text-primary-600" />
 
               Address / Location
+
             </label>
 
             {formData.address && (
               <button
                 type="button"
-                onClick={openMap}
+                onClick={
+                  openMap
+                }
                 className="flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700"
               >
+
                 <ExternalLink className="h-4 w-4" />
 
                 View on Map
+
               </button>
             )}
 
@@ -645,27 +1534,36 @@ await performSave(dataToSave);
             id="address"
             name="address"
             rows={3}
-            value={formData.address || ""}
-            onChange={handleChange}
+            value={
+              formData.address ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="Company address / City / State / Country"
             className="w-full rounded-lg border border-gray-300 px-3 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           />
 
           {formData.address && (
             <div className="mt-2 flex items-start gap-2 text-sm text-gray-500">
+
               <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
 
               <span>
-                {formData.address}
+                {
+                  formData.address
+                }
               </span>
+
             </div>
           )}
 
         </div>
 
-        {/* ============================================
+        {/* =====================================================
             OTHER DETAILS
-        ============================================ */}
+        ===================================================== */}
 
         <div className="mt-6">
 
@@ -680,52 +1578,72 @@ await performSave(dataToSave);
             id="other_details"
             name="other_details"
             rows={3}
-            value={formData.other_details || ""}
-            onChange={handleChange}
+            value={
+              formData.other_details ||
+              ""
+            }
+            onChange={
+              handleChange
+            }
             placeholder="Any other information found on the card..."
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           />
 
         </div>
 
-        {/* ============================================
+        {/* =====================================================
             ALL QR DATA
-        ============================================ */}
+        ===================================================== */}
 
         {qrCount > 0 && (
           <div className="mt-6 space-y-3">
 
             <div className="flex items-center gap-2">
+
               <QrCode className="h-5 w-5 text-green-600" />
 
               <p className="font-medium text-green-800">
-                QR Code{qrCount > 1 ? "s" : ""} Detected
+
+                QR Code
+                {qrCount > 1
+                  ? "s"
+                  : ""}{" "}
+                Detected
+
               </p>
+
             </div>
 
-            {qrCodes.map((qr, index) => (
-              <div
-                key={`${qr}-${index}`}
-                className="rounded-lg border border-green-200 bg-green-50 p-4"
-              >
+            {qrCodes.map(
+              (
+                qr,
+                index
+              ) => (
+                <div
+                  key={`${qr}-${index}`}
+                  className="rounded-lg border border-green-200 bg-green-50 p-4"
+                >
 
-                <p className="text-xs text-green-600 mb-1">
-                  QR {index + 1}
-                </p>
+                  <p className="text-xs text-green-600 mb-1">
+                    QR{" "}
+                    {index +
+                      1}
+                  </p>
 
-                <p className="text-sm text-green-700 break-all">
-                  {qr}
-                </p>
+                  <p className="text-sm text-green-700 break-all">
+                    {qr}
+                  </p>
 
-              </div>
-            ))}
+                </div>
+              )
+            )}
 
           </div>
         )}
 
-        {/* ============================================
+        {/* =====================================================
             ERROR
-        ============================================ */}
+        ===================================================== */}
 
         {error && (
           <div className="mt-6 bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-lg">
@@ -733,90 +1651,218 @@ await performSave(dataToSave);
           </div>
         )}
 
-        {/* ============================================
-            ACTIONS
-        ============================================ */}
+        {/* =====================================================
+            ACTION BUTTONS
+        ===================================================== */}
 
         <div className="mt-8 flex flex-col sm:flex-row gap-3">
 
+          {/* CANCEL */}
+
           <Button
             variant="outline"
-            onClick={() => router.push("/")}
+            onClick={() =>
+              router.push("/")
+            }
             className="flex-1"
-            disabled={isLoading}
+            disabled={
+              isLoading
+            }
           >
+
             <ArrowLeft className="h-4 w-4 mr-2" />
 
             Cancel
+
           </Button>
 
-          <Button
-            onClick={handleSave}
-            className="flex-1"
-            isLoading={isLoading}
-          >
-            <Save className="h-4 w-4 mr-2" />
+          {/* =================================================
+              MULTIPLE CARDS
+              SAVE & NEXT
+          ================================================= */}
 
-            Confirm & Save
-          </Button>
+          {cards.length > 1 &&
+          currentIndex <
+            cards.length - 1 ? (
+            <Button
+              onClick={
+                handleSave
+              }
+              className="flex-1"
+              isLoading={
+                isLoading
+              }
+              disabled={
+                isLoading
+              }
+            >
+
+              <Save className="h-4 w-4 mr-2" />
+
+              Save & Next
+
+              <ArrowRight className="h-4 w-4 ml-2" />
+
+            </Button>
+          ) : (
+            /* =================================================
+               LAST CARD / SINGLE CARD
+            ================================================= */
+
+            <Button
+              onClick={
+                handleSave
+              }
+              className="flex-1"
+              isLoading={
+                isLoading
+              }
+              disabled={
+                isLoading
+              }
+            >
+
+              <Save className="h-4 w-4 mr-2" />
+
+              {cards.length > 1
+                ? "Confirm & Save Last Card"
+                : "Confirm & Save"}
+
+            </Button>
+          )}
 
         </div>
-        {/* ========== DUPLICATE COMPANY CONFIRMATION ========== */}
-{showDuplicateConfirm && (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-    <div
-      className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-      onClick={() => {
-        setShowDuplicateConfirm(false);
-        setPendingSaveData(null);
-      }}
-    />
 
-    <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-      <div className="flex flex-col items-center text-center">
-        <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mb-4">
-          <Building2 className="h-7 w-7 text-amber-600" />
-        </div>
+        {/* =====================================================
+            DUPLICATE COMPANY CONFIRMATION
+        ===================================================== */}
 
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-          Company Already Exists
-        </h3>
+        {showDuplicateConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
 
-        <p className="text-sm text-gray-600 mb-6">
-          A card with company name{" "}
-          <span className="font-semibold text-gray-900">
-            “{pendingSaveData?.company_name}”
-          </span>{" "}
-          is already saved.
-          <br />
-          Do you still want to save this card?
-        </p>
+            {/* BACKDROP */}
 
-        <div className="flex gap-3 w-full">
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={() => {
-              setShowDuplicateConfirm(false);
-              setPendingSaveData(null);
-            }}
-            disabled={isLoading}
-          >
-            No, Cancel
-          </Button>
+            <div
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => {
+                if (
+                  !isLoading
+                ) {
+                  setShowDuplicateConfirm(
+                    false
+                  );
 
-          <Button
-            className="flex-1"
-            onClick={() => performSave(pendingSaveData)}
-            isLoading={isLoading}
-          >
-            Yes, Save Anyway
-          </Button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+                  setPendingSaveData(
+                    null
+                  );
+
+                  setPendingNextIndex(
+                    null
+                  );
+                }
+              }}
+            />
+
+            {/* MODAL */}
+
+            <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+
+              <div className="flex flex-col items-center text-center">
+
+                {/* ICON */}
+
+                <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mb-4">
+
+                  <Building2 className="h-7 w-7 text-amber-600" />
+
+                </div>
+
+                {/* TITLE */}
+
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  Company Already Exists
+                </h3>
+
+                {/* MESSAGE */}
+
+                <p className="text-sm text-gray-600 mb-6">
+
+                  A card with company name{" "}
+
+                  <span className="font-semibold text-gray-900">
+
+                    “
+                    {
+                      pendingSaveData?.company_name
+                    }
+                    ”
+
+                  </span>{" "}
+
+                  is already saved.
+
+                  <br />
+
+                  Do you still want to save this card?
+
+                </p>
+
+                {/* BUTTONS */}
+
+                <div className="flex gap-3 w-full">
+
+                  {/* CANCEL */}
+
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setShowDuplicateConfirm(
+                        false
+                      );
+
+                      setPendingSaveData(
+                        null
+                      );
+
+                      setPendingNextIndex(
+                        null
+                      );
+                    }}
+                    disabled={
+                      isLoading
+                    }
+                  >
+                    No, Cancel
+                  </Button>
+
+                  {/* SAVE ANYWAY */}
+
+                  <Button
+                    className="flex-1"
+                    onClick={() =>
+                      performSave(
+                        pendingSaveData
+                      )
+                    }
+                    isLoading={
+                      isLoading
+                    }
+                    disabled={
+                      isLoading
+                    }
+                  >
+                    Yes, Save Anyway
+                  </Button>
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+        )}
 
       </div>
     </div>

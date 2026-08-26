@@ -1,6 +1,5 @@
 export type SourceType = "scan" | "pdf" | "url";
 
-
 // =====================================================
 // SAVED CARD - EXACT SUPABASE DATA
 // =====================================================
@@ -36,6 +35,28 @@ export interface BusinessCard {
 
 
 // =====================================================
+// QR DETAIL
+// =====================================================
+
+export interface QrDetail {
+  raw: string;
+
+  type:
+    | "instagram"
+    | "whatsapp"
+    | "phone"
+    | "email"
+    | "location"
+    | "website"
+    | "other";
+
+  label: string;
+
+  url: string | null;
+}
+
+
+// =====================================================
 // EXTRACTED CARD
 // Scanner can contain additional temporary information
 // =====================================================
@@ -47,6 +68,7 @@ export interface ExtractedCard {
   designation?: string | null;
 
   qr_codes?: string[] | null;
+  qr_details?: QrDetail[] | null;
 
   address?: string | null;
 
@@ -66,8 +88,11 @@ export interface ExtractedCard {
   // Temporary scanner/review information
   front_image_url?: string | null;
   back_image_url?: string | null;
+
   qr_raw?: string | null;
+
   source_type?: SourceType | null;
+
   original_file_url?: string | null;
 }
 
@@ -78,21 +103,10 @@ export interface ExtractedCard {
 
 export interface ApiResponse<T> {
   success: boolean;
+
   message?: string;
+
   data?: T;
+
   card?: T;
-}
-
-export interface QrDetail {
-  raw: string;
-  type: "instagram" | "whatsapp" | "phone" | "email" | "location" | "website" | "other";
-  label: string;
-  url: string | null;
-}
-
-export interface ExtractedCard {
-  // ... existing fields
-  qr_raw?: string | null;
-  qr_codes?: string[] | null;
-  qr_details?: QrDetail[] | null;
 }

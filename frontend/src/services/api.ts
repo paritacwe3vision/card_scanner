@@ -4,10 +4,8 @@ import {
   ApiResponse,
 } from "@/types/card";
 
-
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 
 // =====================================================
 // AUTH TYPES
@@ -19,7 +17,6 @@ interface AuthUser {
   full_name: string | null;
 }
 
-
 interface AuthResponse {
   success: boolean;
   message: string;
@@ -30,6 +27,19 @@ interface LogoutResponse {
   success: boolean;
   message: string;
 }
+
+// =====================================================
+// PDF RESPONSE TYPES
+// =====================================================
+
+interface MultiplePdfResponse {
+  success: boolean;
+  message: string;
+  cards?: ExtractedCard[];
+  card?: ExtractedCard | ExtractedCard[];
+  count?: number;
+}
+
 // =====================================================
 // COMMON RESPONSE HANDLER
 // =====================================================
@@ -37,15 +47,14 @@ interface LogoutResponse {
 async function handleResponse<T>(
   response: Response
 ): Promise<T> {
-
-  const contentType = response.headers.get("content-type");
+  const contentType =
+    response.headers.get("content-type");
 
   // -----------------------------------------
   // Backend did not return JSON
   // -----------------------------------------
 
   if (!contentType?.includes("application/json")) {
-
     const text = await response.text();
 
     console.error(
@@ -54,7 +63,8 @@ async function handleResponse<T>(
     );
 
     throw new Error(
-      text || "Backend returned an invalid response"
+      text ||
+        "Backend returned an invalid response"
     );
   }
 
@@ -65,25 +75,25 @@ async function handleResponse<T>(
   // -----------------------------------------
 
   if (!response.ok) {
-
     console.error(
       "Backend error:",
       data
     );
 
-    let errorMessage = "Something went wrong";
+    let errorMessage =
+      "Something went wrong";
 
-    if (typeof data?.detail === "string") {
-
+    if (
+      typeof data?.detail === "string"
+    ) {
       errorMessage = data.detail;
 
-    } else if (typeof data?.message === "string") {
-
+    } else if (
+      typeof data?.message === "string"
+    ) {
       errorMessage = data.message;
 
     } else if (data?.detail) {
-
-      // detail is an object/array
       errorMessage = JSON.stringify(
         data.detail,
         null,
@@ -91,8 +101,6 @@ async function handleResponse<T>(
       );
 
     } else if (data) {
-
-      // fallback for any other JSON response
       errorMessage = JSON.stringify(
         data,
         null,
@@ -100,25 +108,27 @@ async function handleResponse<T>(
       );
     }
 
-    throw new Error(errorMessage);
+    throw new Error(
+      errorMessage
+    );
   }
 
   return data;
 }
 
-
 // =====================================================
 // AUTHENTICATION
 // =====================================================
 
+// =====================================================
+// CREATE ACCOUNT
+// =====================================================
 
-// Create Account
 export async function signupUser(
   fullName: string,
   email: string,
   password: string
 ): Promise<AuthResponse> {
-
   const response = await fetch(
     `${API_BASE}/auth/signup`,
     {
@@ -136,16 +146,19 @@ export async function signupUser(
     }
   );
 
-  return handleResponse<AuthResponse>(response);
+  return handleResponse<AuthResponse>(
+    response
+  );
 }
 
+// =====================================================
+// LOGIN
+// =====================================================
 
-// Login
 export async function loginUser(
   email: string,
   password: string
 ): Promise<AuthResponse> {
-
   const response = await fetch(
     `${API_BASE}/auth/login`,
     {
@@ -162,27 +175,29 @@ export async function loginUser(
     }
   );
 
-  return handleResponse<AuthResponse>(response);
+  return handleResponse<AuthResponse>(
+    response
+  );
 }
-
 
 // =====================================================
 // BUSINESS CARD APIs
 // =====================================================
 
-
 // =====================================================
-// Upload from Camera / Image (Scan)
+// UPLOAD FROM CAMERA / IMAGE
 // =====================================================
 
 export async function uploadScan(
   frontFile: File,
   backFile?: File | null
-): Promise<ApiResponse<any>> {
-
+): Promise<
+  ApiResponse<ExtractedCard>
+> {
   const formData = new FormData();
 
-  // MUST match FastAPI parameter names
+  // MUST MATCH FASTAPI PARAMETER NAMES
+
   formData.append(
     "front_file",
     frontFile
@@ -203,21 +218,44 @@ export async function uploadScan(
     }
   );
 
-  return handleResponse<ApiResponse<any>>(
-    response
-  );
+  return handleResponse<
+    ApiResponse<ExtractedCard>
+  >(response);
 }
+
 // =====================================================
-// Upload PDF
+// UPLOAD SINGLE PDF
+// =====================================================
+//
+// Backend:
+//
+// @router.post("/pdf")
+// async def process_card_pdf(
+//     files: list[UploadFile] = File(...)
+// )
+//
+// Therefore the FormData field MUST be:
+//
+// "files"
+//
+// Even when uploading only one PDF.
+//
 // =====================================================
 
 export async function uploadPdf(
   file: File
-): Promise<ApiResponse<ExtractedCard>> {
-
+): Promise<
+  ApiResponse<ExtractedCard>
+> {
   const formData = new FormData();
 
-  formData.append("file", file);
+  // IMPORTANT:
+  // Backend expects "files", not "file".
+
+  formData.append(
+    "files",
+    file
+  );
 
   const response = await fetch(
     `${API_BASE}/api/cards/pdf`,
@@ -227,20 +265,332 @@ export async function uploadPdf(
     }
   );
 
-  return handleResponse<ApiResponse<ExtractedCard>>(
-    response
-  );
+  const data =
+    await handleResponse<
+      MultiplePdfResponse
+    >(response);
+
+  // -----------------------------------------
+  // Backend returns:
+  //
+  // {
+  //   success: true,
+  //   message: "...",
+  //   cards: [...],
+  //   card: {...},
+  //   count: 1
+  // }
+  //
+  // uploadPdf() is a single-PDF helper,
+  // therefore return the first card.
+  // -----------------------------------------
+
+  let extractedCard:
+    | ExtractedCard
+    | undefined;
+
+  if (
+    Array.isArray(data.cards) &&
+    data.cards.length > 0
+  ) {
+    extractedCard =
+      data.cards[0];
+
+  } else if (
+    data.card &&
+    !Array.isArray(data.card)
+  ) {
+    extractedCard =
+      data.card;
+  } else if (
+    Array.isArray(data.card) &&
+    data.card.length > 0
+  ) {
+    extractedCard =
+      data.card[0];
+  }
+
+  if (!extractedCard) {
+    throw new Error(
+      data.message ||
+        "No business card details were extracted from the PDF."
+    );
+  }
+
+  return {
+    success: true,
+    message:
+      data.message ||
+      "Business card PDF processed successfully",
+    card: extractedCard,
+  };
 }
 
+// =====================================================
+// UPLOAD MULTIPLE PDFs
+// =====================================================
+//
+// IMPORTANT:
+//
+// Multiple PDFs are sent in ONE request.
+//
+// Example:
+//
+//     card1.pdf
+//     card2.pdf
+//
+// FormData:
+//
+//     files -> card1.pdf
+//     files -> card2.pdf
+//
+// Backend:
+//
+//     files: list[UploadFile]
+//
+// Response:
+//
+//     {
+//       success: true,
+//       cards: [
+//         Card 1,
+//         Card 2
+//       ]
+//     }
+//
+// =====================================================
+
+export async function uploadPdfs(
+  files: File[]
+): Promise<
+  ApiResponse<ExtractedCard[]>
+> {
+  // -----------------------------------------
+  // Validate files
+  // -----------------------------------------
+
+  if (
+    !files ||
+    files.length === 0
+  ) {
+    throw new Error(
+      "Please select at least one PDF file."
+    );
+  }
+
+  // -----------------------------------------
+  // Create multipart FormData
+  // -----------------------------------------
+
+  const formData = new FormData();
+
+  // IMPORTANT:
+  //
+  // Do NOT use:
+  //
+  // formData.append("file", ...)
+  //
+  // Backend expects:
+  //
+  // formData.append("files", ...)
+  //
+  // Multiple files can use the same
+  // FormData field name.
+
+  files.forEach(
+    (file, index) => {
+      console.log(
+        `Adding PDF ${index + 1}/${files.length}:`,
+        file.name
+      );
+
+      formData.append(
+        "files",
+        file
+      );
+    }
+  );
+
+  // -----------------------------------------
+  // Send ONE request containing ALL PDFs
+  // -----------------------------------------
+
+  console.log(
+    `Uploading ${files.length} PDF(s) to backend...`
+  );
+
+  const response = await fetch(
+    `${API_BASE}/api/cards/pdf`,
+    {
+      method: "POST",
+
+      // IMPORTANT:
+      // Do NOT manually set Content-Type.
+      //
+      // Browser automatically sets:
+      //
+      // multipart/form-data;
+      // boundary=...
+      //
+      body: formData,
+    }
+  );
+
+  // -----------------------------------------
+  // Read backend response
+  // -----------------------------------------
+
+  const data =
+    await handleResponse<
+      MultiplePdfResponse
+    >(response);
+
+  // -----------------------------------------
+  // Extract cards
+  // -----------------------------------------
+
+  let extractedCards:
+    ExtractedCard[] = [];
+
+  // Preferred new response:
+  //
+  // cards: [...]
+  if (
+    Array.isArray(data.cards)
+  ) {
+    extractedCards =
+      data.cards;
+  }
+
+  // -----------------------------------------
+  // Backward compatibility
+  // -----------------------------------------
+  //
+  // If backend sends:
+  //
+  // card: [...]
+  //
+  // use it.
+
+  else if (
+    Array.isArray(data.card)
+  ) {
+    extractedCards =
+      data.card;
+  }
+
+  // -----------------------------------------
+  // Single-card fallback
+  // -----------------------------------------
+  //
+  // If backend sends:
+  //
+  // card: {...}
+  //
+  // convert it to:
+  //
+  // [{...}]
+  //
+  else if (
+    data.card &&
+    !Array.isArray(data.card)
+  ) {
+    extractedCards = [
+      data.card,
+    ];
+  }
+
+  // -----------------------------------------
+  // No cards
+  // -----------------------------------------
+
+  if (
+    extractedCards.length === 0
+  ) {
+    return {
+      success: false,
+
+      message:
+        data.message ||
+        "No business card details were extracted from the PDFs.",
+
+      card: [],
+    };
+  }
+
+  // -----------------------------------------
+  // Debug output
+  // -----------------------------------------
+
+  console.log(
+    "========================================"
+  );
+
+  console.log(
+    "TOTAL PDFs UPLOADED:",
+    files.length
+  );
+
+  console.log(
+    "TOTAL CARDS EXTRACTED:",
+    extractedCards.length
+  );
+
+  extractedCards.forEach(
+    (card, index) => {
+      console.log(
+        `CARD ${index + 1}:`,
+        card
+      );
+
+      console.log(
+        `CARD ${index + 1} QR CODES:`,
+        card.qr_codes
+      );
+
+      console.log(
+        `CARD ${index + 1} QR COUNT:`,
+        Array.isArray(
+          card.qr_codes
+        )
+          ? card.qr_codes.length
+          : 0
+      );
+    }
+  );
+
+  console.log(
+    "========================================"
+  );
+
+  // -----------------------------------------
+  // Return all cards
+  // -----------------------------------------
+
+  return {
+    success: true,
+
+    message:
+      data.message ||
+      `Successfully processed ${extractedCards.length} ${
+        extractedCards.length === 1
+          ? "PDF"
+          : "PDFs"
+      }.`,
+
+    card: extractedCards,
+  };
+}
 
 // =====================================================
-// Upload from URL
+// UPLOAD FROM URL
 // =====================================================
 
 export async function uploadUrl(
   url: string
-): Promise<ApiResponse<ExtractedCard>> {
-
+): Promise<
+  ApiResponse<ExtractedCard>
+> {
   const response = await fetch(
     `${API_BASE}/api/cards/url`,
     {
@@ -251,25 +601,41 @@ export async function uploadUrl(
       },
 
       body: JSON.stringify({
-        url,
+        url: url.trim(),
       }),
     }
   );
 
-  return handleResponse<ApiResponse<ExtractedCard>>(
-    response
-  );
+  return handleResponse<
+    ApiResponse<ExtractedCard>
+  >(response);
 }
 
-
 // =====================================================
-// Save Confirmed Card
+// SAVE CONFIRMED CARD
+// =====================================================
+//
+// IMPORTANT:
+//
+// qr_codes[] is sent directly.
+//
+// Example:
+//
+// qr_codes: [
+//   "https://example.com",
+//   "https://instagram.com/example"
+// ]
+//
+// Do NOT convert qr_codes into qr_raw only.
+//
+// This preserves ALL QR codes.
 // =====================================================
 
 export async function saveCard(
   card: ExtractedCard
-): Promise<ApiResponse<BusinessCard>> {
-
+): Promise<
+  ApiResponse<BusinessCard>
+> {
   const response = await fetch(
     `${API_BASE}/api/cards`,
     {
@@ -279,23 +645,45 @@ export async function saveCard(
         "Content-Type": "application/json",
       },
 
-      body: JSON.stringify(card),
+      body: JSON.stringify({
+        ...card,
+
+        // Make sure all QR codes are preserved.
+        qr_codes:
+          Array.isArray(
+            card.qr_codes
+          )
+            ? card.qr_codes
+            : [],
+
+        // Backward-compatible first QR.
+        qr_raw:
+          card.qr_raw ??
+          (
+            Array.isArray(
+              card.qr_codes
+            ) &&
+            card.qr_codes.length > 0
+              ? card.qr_codes[0]
+              : null
+          ),
+      }),
     }
   );
 
-  return handleResponse<ApiResponse<BusinessCard>>(
-    response
-  );
+  return handleResponse<
+    ApiResponse<BusinessCard>
+  >(response);
 }
 
-
 // =====================================================
-// Get All Cards
+// GET ALL CARDS
 // =====================================================
 
 export async function getCards():
-  Promise<ApiResponse<BusinessCard[]>> {
-
+  Promise<
+    ApiResponse<BusinessCard[]>
+  > {
   const response = await fetch(
     `${API_BASE}/api/cards`,
     {
@@ -304,20 +692,20 @@ export async function getCards():
     }
   );
 
-  return handleResponse<ApiResponse<BusinessCard[]>>(
-    response
-  );
+  return handleResponse<
+    ApiResponse<BusinessCard[]>
+  >(response);
 }
 
-
 // =====================================================
-// Delete Card
+// DELETE CARD
 // =====================================================
 
 export async function deleteCard(
   id: string
-): Promise<ApiResponse<null>> {
-
+): Promise<
+  ApiResponse<null>
+> {
   const response = await fetch(
     `${API_BASE}/api/cards/${id}`,
     {
@@ -325,27 +713,34 @@ export async function deleteCard(
     }
   );
 
-  return handleResponse<ApiResponse<null>>(
-    response
-  );
+  return handleResponse<
+    ApiResponse<null>
+  >(response);
 }
 
-
-// Logout
-
+// =====================================================
+// LOGOUT
+// =====================================================
 
 export async function logoutUser(
   userId: string
 ): Promise<LogoutResponse> {
-  const response = await fetch(`${API_BASE}/auth/logout`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      user_id: userId,
-    }),
-  });
+  const response = await fetch(
+    `${API_BASE}/auth/logout`,
+    {
+      method: "POST",
 
-  return handleResponse<LogoutResponse>(response);
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify({
+        user_id: userId,
+      }),
+    }
+  );
+
+  return handleResponse<LogoutResponse>(
+    response
+  );
 }
