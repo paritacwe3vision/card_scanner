@@ -23,9 +23,13 @@ export default function LogoutButton() {
       );
 
       if (!storedUser) {
-        router.replace("/login");
-        return;
-      }
+      localStorage.removeItem(
+        "card_scanner_token"
+      );
+
+      router.replace("/login");
+      return;
+    }
 
       const user = JSON.parse(storedUser);
 
@@ -33,11 +37,14 @@ export default function LogoutButton() {
       // login table → logout table
       await logoutUser(user.id);
 
-      // Remove current frontend session
+     // Remove current frontend session
       localStorage.removeItem(
         "card_scanner_user"
       );
 
+      localStorage.removeItem(
+        "card_scanner_token"
+      );
       // Redirect to login page
       router.replace("/login");
 

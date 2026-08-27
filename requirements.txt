@@ -27,5 +27,6 @@ PyMuPDF
 Pillow
 jspdf
 xlsx
+PyJWT
 
 pyzbar

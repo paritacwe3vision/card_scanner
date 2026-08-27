@@ -3,7 +3,10 @@ from fastapi import (
     UploadFile,
     File,
     HTTPException,
+     Depends,
 )
+
+from backend.core.auth import get_current_user
 
 from backend.models.card import (
     CardCreate,
@@ -599,6 +602,7 @@ async def process_card_url(
 @router.post("")
 async def save_business_card(
     card: CardCreate,
+    current_user: dict = Depends(get_current_user),
 ):
     try:
 
@@ -667,8 +671,9 @@ async def save_business_card(
         # =====================================================
 
         saved_card = create_card(
-            card_data
-        )
+        card_data,
+        str(current_user["id"]),
+    )
 
         # =====================================================
         # DEBUG SAVED DATA
@@ -722,11 +727,15 @@ async def save_business_card(
 # ============================================================
 
 @router.get("")
-async def get_business_cards():
+async def get_business_cards(
+    current_user: dict = Depends(get_current_user),
+):
 
     try:
 
-        cards = get_all_cards()
+        cards = get_all_cards(
+            str(current_user["id"])
+        )
 
         return {
             "success": True,
@@ -754,13 +763,15 @@ async def get_business_cards():
 @router.delete("/{card_id}")
 async def remove_business_card(
     card_id: str,
+    current_user: dict = Depends(get_current_user),
 ):
 
     try:
 
         deleted = delete_card(
-            card_id
-        )
+        card_id,
+        str(current_user["id"]),
+    )
 
         if not deleted:
 

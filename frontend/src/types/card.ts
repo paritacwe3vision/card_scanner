@@ -13,7 +13,7 @@ export interface BusinessCard {
 
   address: string | null;
 
-  qr_codes?: string[];
+  qr_codes: string[] | null;
 
   email: string | null;
   phone: string | null;

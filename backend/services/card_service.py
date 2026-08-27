@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from backend.core.supabase import supabase
 
 
@@ -47,20 +48,12 @@ def _normalize_qr_codes(
 # CREATE BUSINESS CARD
 # =====================================================
 
-def create_card(card_data: dict):
+def create_card(
+    card_data: dict,
+    user_id: str,
+):
     """
-    Save a business card to Supabase.
-
-    Multiple QR codes are preserved as a list.
-
-    Example:
-
-        qr_codes = [
-            "https://www.revibeperfume.com/",
-            "https://www.instagram.com/revibeperfume/"
-        ]
-
-    The complete list is sent to Supabase.
+    Save a business card for one specific user.
     """
 
     # =================================================
@@ -70,6 +63,42 @@ def create_card(card_data: dict):
     data = dict(card_data)
 
     # =================================================
+    # ATTACH CARD TO CURRENT USER
+    # =================================================
+
+    data["user_id"] = user_id
+
+    # =================================================
+    # CARD RETENTION
+    # =================================================
+
+    retention_response = (
+        supabase
+        .table("login")
+        .select("card_retention_days")
+        .eq("id", user_id)
+        .execute()
+    )
+
+    retention_days = None
+
+    if retention_response.data:
+        retention_days = retention_response.data[0].get(
+            "card_retention_days"
+        )
+
+    if retention_days in [1, 7, 30]:
+        expires_at = (
+            datetime.now(timezone.utc)
+            + timedelta(days=retention_days)
+        )
+
+        data["expires_at"] = expires_at.isoformat()
+
+    else:
+        data["expires_at"] = None
+
+    # =================================================
     # NORMALIZE QR CODES
     # =================================================
 
@@ -77,30 +106,14 @@ def create_card(card_data: dict):
         data.get("qr_codes")
     )
 
-    # Always save the normalized array when QR codes
-    # are present.
-    #
-    # This prevents accidentally saving only qr_codes[0].
-
     if qr_codes:
 
         data["qr_codes"] = qr_codes
-
-        # Keep qr_raw for backward compatibility.
-        #
-        # If qr_raw wasn't supplied, use the first QR
-        # as the legacy single-QR value.
 
         if not data.get("qr_raw"):
             data["qr_raw"] = qr_codes[0]
 
     else:
-
-        # If no QR codes exist, don't send an empty
-        # array unnecessarily when the field is absent.
-        #
-        # If qr_codes was explicitly supplied, keeping []
-        # is also valid for a Postgres text[] column.
 
         if "qr_codes" in data:
             data["qr_codes"] = []
@@ -108,6 +121,11 @@ def create_card(card_data: dict):
     # =================================================
     # DEBUG LOG
     # =================================================
+
+    print(
+        "SAVE CARD - USER ID:",
+        user_id,
+    )
 
     print(
         "SAVE CARD - QR CODES:",
@@ -152,6 +170,11 @@ def create_card(card_data: dict):
     )
 
     print(
+        "SAVED CARD USER ID:",
+        saved_card.get("user_id"),
+    )
+
+    print(
         "SAVED QR CODES:",
         saved_card.get("qr_codes"),
     )
@@ -165,21 +188,25 @@ def create_card(card_data: dict):
 
 
 # =====================================================
-# GET ALL BUSINESS CARDS
+# GET USER'S BUSINESS CARDS
 # =====================================================
 
-def get_all_cards():
+def get_all_cards(
+    user_id: str,
+):
     """
-    Fetch all saved business cards.
-
-    QR codes are returned directly from Supabase,
-    including all values stored in qr_codes[].
+    Fetch only business cards belonging to
+    the currently logged-in user.
     """
 
     response = (
         supabase
         .table(TABLE_NAME)
         .select("*")
+        .eq(
+            "user_id",
+            user_id,
+        )
         .order(
             "created_at",
             desc=True,
@@ -191,14 +218,16 @@ def get_all_cards():
 
 
 # =====================================================
-# DELETE BUSINESS CARD
+# DELETE USER'S BUSINESS CARD
 # =====================================================
 
 def delete_card(
     card_id: str,
+    user_id: str,
 ):
     """
-    Delete one business card by ID.
+    Delete a card only when it belongs
+    to the currently logged-in user.
     """
 
     response = (
@@ -208,6 +237,10 @@ def delete_card(
         .eq(
             "id",
             card_id,
+        )
+        .eq(
+            "user_id",
+            user_id,
         )
         .execute()
     )

@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
+
 import CardTable from "@/components/cards/CardTable";
 import Button from "@/components/ui/Button";
+
 
 export default function CardsPage() {
   return (
@@ -12,6 +14,7 @@ export default function CardsPage() {
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
             My Business Cards
           </h1>
+
           <p className="text-gray-600 mt-1">
             All previously uploaded business cards
           </p>

@@ -21,6 +21,7 @@ interface AuthResponse {
   success: boolean;
   message: string;
   user: AuthUser;
+  access_token?: string;
 }
 
 interface LogoutResponse {
@@ -28,6 +29,11 @@ interface LogoutResponse {
   message: string;
 }
 
+interface RetentionResponse {
+  success: boolean;
+  message?: string;
+  retention_days: number | null;
+}
 // =====================================================
 // PDF RESPONSE TYPES
 // =====================================================
@@ -116,9 +122,24 @@ async function handleResponse<T>(
   return data;
 }
 
-// =====================================================
-// AUTHENTICATION
-// =====================================================
+  function getAuthHeaders(): Record<string, string> {
+    if (typeof window === "undefined") {
+      return {};
+    }
+
+    const token = localStorage.getItem(
+      "card_scanner_token"
+    );
+
+    if (!token) {
+      return {};
+    }
+
+    return {
+      Authorization: `Bearer ${token}`,
+    };
+  }
+
 
 // =====================================================
 // CREATE ACCOUNT
@@ -181,8 +202,56 @@ export async function loginUser(
 }
 
 // =====================================================
-// BUSINESS CARD APIs
+// GET CARD RETENTION SETTING
 // =====================================================
+
+export async function getRetention():
+  Promise<RetentionResponse> {
+  const response = await fetch(
+    `${API_BASE}/auth/retention`,
+    {
+      method: "GET",
+
+      headers: {
+        ...getAuthHeaders(),
+      },
+
+      cache: "no-store",
+    }
+  );
+
+  return handleResponse<RetentionResponse>(
+    response
+  );
+}
+
+// =====================================================
+// UPDATE CARD RETENTION SETTING
+// =====================================================
+
+export async function updateRetention(
+  retentionDays: number | null
+): Promise<RetentionResponse> {
+  const response = await fetch(
+    `${API_BASE}/auth/retention`,
+    {
+      method: "PUT",
+
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(),
+      },
+
+      body: JSON.stringify({
+        retention_days: retentionDays,
+      }),
+    }
+  );
+
+  return handleResponse<RetentionResponse>(
+    response
+  );
+}
 
 // =====================================================
 // UPLOAD FROM CAMERA / IMAGE
@@ -223,25 +292,6 @@ export async function uploadScan(
   >(response);
 }
 
-// =====================================================
-// UPLOAD SINGLE PDF
-// =====================================================
-//
-// Backend:
-//
-// @router.post("/pdf")
-// async def process_card_pdf(
-//     files: list[UploadFile] = File(...)
-// )
-//
-// Therefore the FormData field MUST be:
-//
-// "files"
-//
-// Even when uploading only one PDF.
-//
-// =====================================================
-
 export async function uploadPdf(
   file: File
 ): Promise<
@@ -269,21 +319,6 @@ export async function uploadPdf(
     await handleResponse<
       MultiplePdfResponse
     >(response);
-
-  // -----------------------------------------
-  // Backend returns:
-  //
-  // {
-  //   success: true,
-  //   message: "...",
-  //   cards: [...],
-  //   card: {...},
-  //   count: 1
-  // }
-  //
-  // uploadPdf() is a single-PDF helper,
-  // therefore return the first card.
-  // -----------------------------------------
 
   let extractedCard:
     | ExtractedCard
@@ -326,40 +361,6 @@ export async function uploadPdf(
   };
 }
 
-// =====================================================
-// UPLOAD MULTIPLE PDFs
-// =====================================================
-//
-// IMPORTANT:
-//
-// Multiple PDFs are sent in ONE request.
-//
-// Example:
-//
-//     card1.pdf
-//     card2.pdf
-//
-// FormData:
-//
-//     files -> card1.pdf
-//     files -> card2.pdf
-//
-// Backend:
-//
-//     files: list[UploadFile]
-//
-// Response:
-//
-//     {
-//       success: true,
-//       cards: [
-//         Card 1,
-//         Card 2
-//       ]
-//     }
-//
-// =====================================================
-
 export async function uploadPdfs(
   files: File[]
 ): Promise<
@@ -383,19 +384,6 @@ export async function uploadPdfs(
   // -----------------------------------------
 
   const formData = new FormData();
-
-  // IMPORTANT:
-  //
-  // Do NOT use:
-  //
-  // formData.append("file", ...)
-  //
-  // Backend expects:
-  //
-  // formData.append("files", ...)
-  //
-  // Multiple files can use the same
-  // FormData field name.
 
   files.forEach(
     (file, index) => {
@@ -611,25 +599,6 @@ export async function uploadUrl(
   >(response);
 }
 
-// =====================================================
-// SAVE CONFIRMED CARD
-// =====================================================
-//
-// IMPORTANT:
-//
-// qr_codes[] is sent directly.
-//
-// Example:
-//
-// qr_codes: [
-//   "https://example.com",
-//   "https://instagram.com/example"
-// ]
-//
-// Do NOT convert qr_codes into qr_raw only.
-//
-// This preserves ALL QR codes.
-// =====================================================
 
 export async function saveCard(
   card: ExtractedCard
@@ -640,9 +609,9 @@ export async function saveCard(
     `${API_BASE}/api/cards`,
     {
       method: "POST",
-
       headers: {
         "Content-Type": "application/json",
+        ...getAuthHeaders(),
       },
 
       body: JSON.stringify({
@@ -688,6 +657,11 @@ export async function getCards():
     `${API_BASE}/api/cards`,
     {
       method: "GET",
+
+      headers: {
+        ...getAuthHeaders(),
+      },
+
       cache: "no-store",
     }
   );
@@ -696,7 +670,6 @@ export async function getCards():
     ApiResponse<BusinessCard[]>
   >(response);
 }
-
 // =====================================================
 // DELETE CARD
 // =====================================================
@@ -710,6 +683,10 @@ export async function deleteCard(
     `${API_BASE}/api/cards/${id}`,
     {
       method: "DELETE",
+
+      headers: {
+        ...getAuthHeaders(),
+      },
     }
   );
 
@@ -717,7 +694,6 @@ export async function deleteCard(
     ApiResponse<null>
   >(response);
 }
-
 // =====================================================
 // LOGOUT
 // =====================================================

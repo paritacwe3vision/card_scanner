@@ -40,11 +40,16 @@ export default function CardReviewForm() {
   const [pendingSaveData, setPendingSaveData] =
     useState<any>(null);
 
-  const [pendingNextIndex, setPendingNextIndex] =
-    useState<number | null>(null);
+  // ============================================================
+  // UI STATE
+  // ============================================================
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   // ============================================================
-  // CURRENT FORM DATA
+  // EMPTY CARD
   // ============================================================
 
   const createEmptyCard = (): ExtractedCard => ({
@@ -75,124 +80,64 @@ export default function CardReviewForm() {
     other_details: "",
   });
 
-  const [formData, setFormData] =
-    useState<ExtractedCard>(createEmptyCard());
-
-  // ============================================================
-  // UI STATE
-  // ============================================================
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isReady, setIsReady] = useState(false);
-
   // ============================================================
   // NORMALIZE CARD
   // ============================================================
 
-  const normalizeCard = (
-    card: any
-  ): ExtractedCard => {
+  const normalizeCard = (card: any): ExtractedCard => {
     let qrCodes: string[] = [];
 
     // ----------------------------------------------------------
     // NEW FORMAT
-    // qr_codes: ["QR1", "QR2"]
     // ----------------------------------------------------------
 
     if (Array.isArray(card?.qr_codes)) {
       qrCodes = card.qr_codes
         .filter(
           (qr: unknown): qr is string =>
-            typeof qr === "string" &&
-            qr.trim().length > 0
+            typeof qr === "string" && qr.trim().length > 0
         )
         .map((qr: string) => qr.trim());
     }
 
     // ----------------------------------------------------------
     // OLD FORMAT
-    // qr_raw: "QR1 ||| QR2"
     // ----------------------------------------------------------
 
-    if (
-      qrCodes.length === 0 &&
-      typeof card?.qr_raw === "string" &&
-      card.qr_raw.trim()
-    ) {
-      qrCodes = card.qr_raw
+    if (qrCodes.length === 0 && card?.qr_raw) {
+      qrCodes = String(card.qr_raw)
         .split(" ||| ")
         .map((qr: string) => qr.trim())
         .filter(Boolean);
     }
 
-    // ----------------------------------------------------------
-    // REMOVE DUPLICATES
-    // ----------------------------------------------------------
-
-    qrCodes = Array.from(
-      new Set(qrCodes)
-    );
-
     return {
-      owner_name:
-        card?.owner_name ?? "",
+      owner_name: card?.owner_name ?? "",
+      designation: card?.designation ?? "",
+      company_name: card?.company_name ?? "",
+      address: card?.address ?? "",
+      email: card?.email ?? "",
+      phone: card?.phone ?? "",
+      gst_number: card?.gst_number ?? "",
 
-      designation:
-        card?.designation ?? "",
+      company_logo: card?.company_logo ?? null,
 
-      company_name:
-        card?.company_name ?? "",
+      website_url: card?.website_url ?? "",
+      instagram_url: card?.instagram_url ?? "",
+      facebook_url: card?.facebook_url ?? "",
+      linkedin_url: card?.linkedin_url ?? "",
 
-      address:
-        card?.address ?? "",
+      front_image_url: card?.front_image_url ?? null,
+      back_image_url: card?.back_image_url ?? null,
 
-      email:
-        card?.email ?? "",
+      source_type: card?.source_type ?? "scan",
+      original_file_url: card?.original_file_url ?? null,
 
-      phone:
-        card?.phone ?? "",
+      qr_raw: qrCodes.length > 0 ? qrCodes[0] : null,
 
-      gst_number:
-        card?.gst_number ?? "",
+      qr_codes: qrCodes,
 
-      company_logo:
-        card?.company_logo ?? null,
-
-      website_url:
-        card?.website_url ?? "",
-
-      instagram_url:
-        card?.instagram_url ?? "",
-
-      facebook_url:
-        card?.facebook_url ?? "",
-
-      linkedin_url:
-        card?.linkedin_url ?? "",
-
-      front_image_url:
-        card?.front_image_url ?? null,
-
-      back_image_url:
-        card?.back_image_url ?? null,
-
-      source_type:
-        card?.source_type ?? "scan",
-
-      original_file_url:
-        card?.original_file_url ?? null,
-
-      qr_raw:
-        qrCodes.length > 0
-          ? qrCodes.join(" ||| ")
-          : null,
-
-      qr_codes:
-        qrCodes,
-
-      other_details:
-        card?.other_details ?? "",
+      other_details: card?.other_details ?? "",
     };
   };
 
@@ -204,26 +149,21 @@ export default function CardReviewForm() {
     const loadExtractedCards = () => {
       try {
         // ======================================================
-        // CHECK MULTIPLE CARDS FIRST
+        // MULTIPLE CARDS
         // ======================================================
 
         const storedCards =
-          sessionStorage.getItem(
-            "extractedCards"
-          );
+          sessionStorage.getItem("extractedCards");
 
         if (storedCards) {
-          const parsedCards =
-            JSON.parse(storedCards);
+          const parsedCards = JSON.parse(storedCards);
 
           if (
             Array.isArray(parsedCards) &&
             parsedCards.length > 0
           ) {
             const normalizedCards =
-              parsedCards.map(
-                normalizeCard
-              );
+              parsedCards.map(normalizeCard);
 
             console.log(
               "========================================"
@@ -243,16 +183,8 @@ export default function CardReviewForm() {
               "========================================"
             );
 
-            setCards(
-              normalizedCards
-            );
-
+            setCards(normalizedCards);
             setCurrentIndex(0);
-
-            setFormData(
-              normalizedCards[0]
-            );
-
             setIsReady(true);
 
             return;
@@ -260,21 +192,18 @@ export default function CardReviewForm() {
         }
 
         // ======================================================
-        // FALLBACK TO SINGLE CARD
+        // SINGLE CARD FALLBACK
         // ======================================================
 
         const storedCard =
-          sessionStorage.getItem(
-            "extractedCard"
-          );
+          sessionStorage.getItem("extractedCard");
 
         if (!storedCard) {
           router.push("/");
           return;
         }
 
-        const parsedCard =
-          JSON.parse(storedCard);
+        const parsedCard = JSON.parse(storedCard);
 
         const normalizedCard =
           normalizeCard(parsedCard);
@@ -284,16 +213,8 @@ export default function CardReviewForm() {
           normalizedCard
         );
 
-        setCards([
-          normalizedCard,
-        ]);
-
+        setCards([normalizedCard]);
         setCurrentIndex(0);
-
-        setFormData(
-          normalizedCard
-        );
-
         setIsReady(true);
       } catch (err) {
         console.error(
@@ -313,6 +234,28 @@ export default function CardReviewForm() {
   }, [router]);
 
   // ============================================================
+  // KEEP FORM DATA SYNCHRONIZED WITH CURRENT CARD
+  // ============================================================
+
+  const [formData, setFormData] =
+    useState<ExtractedCard>(
+      createEmptyCard()
+    );
+
+  useEffect(() => {
+    if (
+      cards.length > 0 &&
+      cards[currentIndex]
+    ) {
+      setFormData(
+        normalizeCard(
+          cards[currentIndex]
+        )
+      );
+    }
+  }, [cards, currentIndex]);
+
+  // ============================================================
   // HANDLE FORM CHANGE
   // ============================================================
 
@@ -326,12 +269,10 @@ export default function CardReviewForm() {
       value,
     } = e.target;
 
-    setFormData(
-      (previous) => ({
-        ...previous,
-        [name]: value,
-      })
-    );
+    setFormData((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
   };
 
   // ============================================================
@@ -342,52 +283,63 @@ export default function CardReviewForm() {
     card: ExtractedCard
   ) => {
     // ----------------------------------------------------------
-    // CLEAN QR CODES
+    // CLEAN ALL QR CODES
     // ----------------------------------------------------------
 
-    const qrCodes: string[] =
-      Array.isArray(card.qr_codes)
-        ? card.qr_codes
-            .filter(
-              (
-                qr
-              ): qr is string =>
-                typeof qr ===
-                  "string" &&
-                qr.trim().length >
-                  0
-            )
-            .map(
-              (qr) =>
-                qr.trim()
-            )
-        : [];
+    let qrCodes: string[] = [];
+
+    if (Array.isArray(card.qr_codes)) {
+      qrCodes = card.qr_codes
+        .filter(
+          (qr): qr is string =>
+            typeof qr === "string" &&
+            qr.trim().length > 0
+        )
+        .map((qr) => qr.trim());
+    }
 
     // ----------------------------------------------------------
-    // REMOVE DUPLICATES
+    // BACKWARD COMPATIBILITY
     // ----------------------------------------------------------
 
-    const uniqueQrCodes =
-      Array.from(
-        new Set(qrCodes)
-      );
+    if (
+      qrCodes.length === 0 &&
+      card.qr_raw
+    ) {
+      qrCodes = String(card.qr_raw)
+        .split(" ||| ")
+        .map((qr) => qr.trim())
+        .filter(Boolean);
+    }
 
     // ----------------------------------------------------------
-    // CREATE qr_raw
+    // REMOVE DUPLICATE QR URLs
+    // ----------------------------------------------------------
+
+    qrCodes = Array.from(
+      new Set(qrCodes)
+    );
+
+    // ----------------------------------------------------------
+    // qr_raw
+    //
+    // IMPORTANT:
+    //
+    // If your current Supabase table DOES NOT have qr_codes,
+    // we only send qr_raw.
+    //
+    // qr_raw contains all QR values:
+    //
+    // QR1 ||| QR2 ||| QR3
+    //
     // ----------------------------------------------------------
 
     const joinedQrRaw =
-      uniqueQrCodes.length > 0
-        ? uniqueQrCodes.join(
-            " ||| "
-          )
+      qrCodes.length > 0
+        ? qrCodes.join(" ||| ")
         : null;
 
-    // ----------------------------------------------------------
-    // RETURN COMPLETE CARD
-    // ----------------------------------------------------------
-
-    return {
+    const dataToSave = {
       owner_name:
         card.owner_name?.trim() ||
         "Unknown",
@@ -436,71 +388,102 @@ export default function CardReviewForm() {
         card.linkedin_url?.trim() ||
         null,
 
-      front_image_url:
-        card.front_image_url ||
-        null,
-
-      back_image_url:
-        card.back_image_url ||
-        null,
-
-      source_type:
-        card.source_type ||
-        "scan",
-
-      original_file_url:
-        card.original_file_url ||
-        null,
-
       other_details:
         card.other_details?.trim() ||
         null,
 
-      // --------------------------------------------------------
-      // IMPORTANT
-      // SAVE ALL QR CODES
-      // --------------------------------------------------------
+      // ========================================================
+      // QR DATA
+      // ========================================================
 
-      qr_raw:
-        joinedQrRaw,
-
-      qr_codes:
-        uniqueQrCodes,
+      qr_raw: joinedQrRaw,
     };
+
+    return dataToSave;
   };
 
   // ============================================================
-  // SAVE CARD TO BACKEND
+  // SAVE CURRENT CARD TO DATABASE
   // ============================================================
 
-  const saveCardToBackend = async (
-    dataToSave: any
+  const saveCurrentCardToDatabase = async (
+    card: ExtractedCard
   ) => {
-    console.log(
-      "========================================"
-    );
-
-    console.log(
-      "CARD DATA BEING SAVED:"
-    );
-
-    console.log(
-      dataToSave
-    );
-
-    console.log(
-      "QR CODES:",
-      dataToSave.qr_codes
-    );
-
-    console.log(
-      "QR COUNT:",
-      dataToSave.qr_codes?.length ?? 0
-    );
+    const dataToSave =
+      prepareSaveData(card);
 
     console.log(
       "========================================"
     );
+
+    console.log(
+      "SAVING CARD:",
+      currentIndex + 1
+    );
+
+    console.log(
+      "COMPANY:",
+      dataToSave.company_name
+    );
+
+    console.log(
+      "QR DATA:",
+      dataToSave.qr_raw
+    );
+
+    console.log(
+      "========================================"
+    );
+
+    // ==========================================================
+    // DUPLICATE COMPANY CHECK
+    // ==========================================================
+
+    const companyName =
+      dataToSave.company_name?.trim() ||
+      null;
+
+    if (companyName) {
+      const existing =
+        await getCards();
+
+      if (
+        existing.success &&
+        existing.data
+      ) {
+        const isDuplicate =
+          existing.data.some(
+            (existingCard: any) =>
+              existingCard.company_name &&
+              existingCard.company_name
+                .toLowerCase()
+                .trim() ===
+                companyName.toLowerCase()
+          );
+
+        if (isDuplicate) {
+          // ----------------------------------------------------
+          // DO NOT SAVE YET
+          //
+          // Caller will show confirmation popup.
+          // ----------------------------------------------------
+
+          setPendingSaveData(
+            dataToSave
+          );
+
+          setShowDuplicateConfirm(
+            true
+          );
+
+          return false;
+        }
+      }
+    }
+
+    // ==========================================================
+    // SAVE
+    // ==========================================================
 
     const response =
       await saveCard(
@@ -514,96 +497,22 @@ export default function CardReviewForm() {
       );
     }
 
-    return response;
+    console.log(
+      `CARD ${currentIndex + 1} SAVED SUCCESSFULLY`
+    );
+
+    return true;
   };
 
   // ============================================================
-  // CHECK DUPLICATE COMPANY
+  // SAVE & NEXT
   // ============================================================
 
-  const checkDuplicateCompany = async (
-    dataToSave: any
-  ) => {
-    const companyName =
-      dataToSave.company_name
-        ?.trim() ||
-      null;
-
-    // ----------------------------------------------------------
-    // No company name
-    // ----------------------------------------------------------
-
-    if (!companyName) {
-      return false;
-    }
-
-    // ----------------------------------------------------------
-    // Get existing cards
-    // ----------------------------------------------------------
-
-    const existing =
-      await getCards();
-
+  const handleNext = async () => {
     if (
-      !existing.success ||
-      !existing.data
+      currentIndex >=
+      cards.length - 1
     ) {
-      return false;
-    }
-
-    // ----------------------------------------------------------
-    // Compare company names
-    // ----------------------------------------------------------
-
-    const isDuplicate =
-      existing.data.some(
-        (card: any) =>
-          card.company_name &&
-          card.company_name
-            .toLowerCase()
-            .trim() ===
-            companyName.toLowerCase()
-    );
-
-    return isDuplicate;
-  };
-
-  // ============================================================
-  // MOVE TO NEXT CARD
-  // ============================================================
-
-  const moveToNextCard = (
-    nextIndex: number
-  ) => {
-    if (
-      nextIndex >=
-      cards.length
-    ) {
-      return;
-    }
-
-    setCurrentIndex(
-      nextIndex
-    );
-
-    setFormData(
-      cards[nextIndex]
-    );
-
-    setError(null);
-
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
-  };
-
-  // ============================================================
-  // SAVE CURRENT CARD
-  // ============================================================
-
-  const handleSave = async () => {
-    if (isLoading) {
       return;
     }
 
@@ -611,198 +520,92 @@ export default function CardReviewForm() {
     setError(null);
 
     try {
-      // ======================================================
+      // ========================================================
       // IMPORTANT:
-      // Store CURRENT EDITED FORM in cards array
-      // ======================================================
+      //
+      // First create the updated current card using formData.
+      //
+      // Do NOT wait for setCards().
+      // React state updates are asynchronous.
+      // ========================================================
 
-      const updatedCards =
-        [...cards];
+      const updatedCurrentCard: ExtractedCard =
+        normalizeCard(
+          formData
+        );
 
-      updatedCards[currentIndex] =
-        {
-          ...formData,
-        };
+      // ========================================================
+      // UPDATE LOCAL CARD ARRAY
+      // ========================================================
+
+      const updatedCards = [
+        ...cards,
+      ];
+
+      updatedCards[
+        currentIndex
+      ] = updatedCurrentCard;
 
       setCards(
         updatedCards
       );
 
-      // ======================================================
-      // PREPARE DATA
-      // ======================================================
+      // ========================================================
+      // SAVE CURRENT CARD FIRST
+      // ========================================================
 
-      const dataToSave =
-        prepareSaveData(
-          formData
+      const saved =
+        await saveCurrentCardToDatabase(
+          updatedCurrentCard
         );
 
-      // ======================================================
-      // DUPLICATE CHECK
-      // ======================================================
+      // ========================================================
+      // DUPLICATE FOUND
+      //
+      // Do NOT move to next card.
+      // Popup will handle it.
+      // ========================================================
 
-      const isDuplicate =
-        await checkDuplicateCompany(
-          dataToSave
-        );
-
-      if (isDuplicate) {
-        console.log(
-          "Duplicate company detected:",
-          dataToSave.company_name
-        );
-
-        setPendingSaveData(
-          dataToSave
-        );
-
-        setPendingNextIndex(
-          currentIndex <
-            cards.length - 1
-            ? currentIndex + 1
-            : null
-        );
-
-        setShowDuplicateConfirm(
-          true
-        );
-
+      if (!saved) {
         setIsLoading(false);
-
         return;
       }
 
-      // ======================================================
-      // SAVE DIRECTLY
-      // ======================================================
-
-      await performSave(
-        dataToSave
-      );
-    } catch (err: any) {
-      console.error(
-        "SAVE CARD ERROR:",
-        err
-      );
-
-      setError(
-        err?.message ||
-          "Something went wrong while saving the card"
-      );
-
-      setIsLoading(false);
-    }
-  };
-
-  // ============================================================
-  // PERFORM ACTUAL SAVE
-  // ============================================================
-
-  const performSave = async (
-    dataToSave: any
-  ) => {
-    if (!dataToSave) {
-      setError(
-        "No card data available to save."
-      );
-
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // ======================================================
-      // SAVE TO BACKEND
-      // ======================================================
-
-      await saveCardToBackend(
-        dataToSave
-      );
-
-      console.log(
-        "CARD SAVED SUCCESSFULLY"
-      );
-
-      // ======================================================
-      // CHECK FOR MORE CARDS
-      // ======================================================
+      // ========================================================
+      // MOVE TO NEXT CARD
+      // ========================================================
 
       const nextIndex =
-        pendingNextIndex !== null
-          ? pendingNextIndex
-          : currentIndex <
-              cards.length - 1
-            ? currentIndex + 1
-            : null;
+        currentIndex + 1;
 
-      // ======================================================
-      // MORE CARDS
-      // ======================================================
-
-      if (
-        nextIndex !== null &&
-        nextIndex < cards.length
-      ) {
-        setShowDuplicateConfirm(
-          false
-        );
-
-        setPendingSaveData(
-          null
-        );
-
-        setPendingNextIndex(
-          null
-        );
-
-        moveToNextCard(
-          nextIndex
-        );
-
-        return;
-      }
-
-      // ======================================================
-      // ALL CARDS SAVED
-      // ======================================================
-
-      sessionStorage.removeItem(
-        "extractedCard"
+      setCurrentIndex(
+        nextIndex
       );
 
-      sessionStorage.removeItem(
-        "extractedCards"
+      setFormData(
+        normalizeCard(
+          updatedCards[nextIndex]
+        )
       );
 
-      router.push(
-        "/cards"
-      );
+      setError(null);
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
     } catch (err: any) {
       console.error(
-        "PERFORM SAVE ERROR:",
+        "SAVE & NEXT ERROR:",
         err
       );
 
       setError(
         err?.message ||
-          "Something went wrong while saving the card"
+          "Failed to save this card"
       );
     } finally {
       setIsLoading(false);
-
-      setShowDuplicateConfirm(
-        false
-      );
-
-      setPendingSaveData(
-        null
-      );
-
-      setPendingNextIndex(
-        null
-      );
     }
   };
 
@@ -819,21 +622,27 @@ export default function CardReviewForm() {
     }
 
     // ----------------------------------------------------------
-    // IMPORTANT:
-    // Save current edited form in local state before moving.
+    // Save current edits locally
     // ----------------------------------------------------------
 
-    const updatedCards =
-      [...cards];
+    const updatedCurrentCard =
+      normalizeCard(formData);
 
-    updatedCards[currentIndex] =
-      {
-        ...formData,
-      };
+    const updatedCards = [
+      ...cards,
+    ];
+
+    updatedCards[
+      currentIndex
+    ] = updatedCurrentCard;
 
     setCards(
       updatedCards
     );
+
+    // ----------------------------------------------------------
+    // Move previous
+    // ----------------------------------------------------------
 
     const previousIndex =
       currentIndex - 1;
@@ -843,9 +652,11 @@ export default function CardReviewForm() {
     );
 
     setFormData(
-      updatedCards[
-        previousIndex
-      ]
+      normalizeCard(
+        updatedCards[
+          previousIndex
+        ]
+      )
     );
 
     setError(null);
@@ -857,13 +668,275 @@ export default function CardReviewForm() {
   };
 
   // ============================================================
+  // SAVE LAST CARD
+  // ============================================================
+
+  const handleSave = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // ========================================================
+      // SAVE CURRENT EDITED CARD LOCALLY
+      // ========================================================
+
+      const updatedCurrentCard =
+        normalizeCard(formData);
+
+      const updatedCards = [
+        ...cards,
+      ];
+
+      updatedCards[
+        currentIndex
+      ] = updatedCurrentCard;
+
+      setCards(
+        updatedCards
+      );
+
+      // ========================================================
+      // SAVE CURRENT CARD
+      // ========================================================
+
+      const saved =
+        await saveCurrentCardToDatabase(
+          updatedCurrentCard
+        );
+
+      // ========================================================
+      // DUPLICATE FOUND
+      // ========================================================
+
+      if (!saved) {
+        setIsLoading(false);
+        return;
+      }
+
+      // ========================================================
+      // CHECK IF THIS WAS REALLY THE LAST CARD
+      // ========================================================
+
+      if (
+        currentIndex <
+        updatedCards.length - 1
+      ) {
+        // ------------------------------------------------------
+        // There are still cards remaining.
+        // ------------------------------------------------------
+
+        const nextIndex =
+          currentIndex + 1;
+
+        setCurrentIndex(
+          nextIndex
+        );
+
+        setFormData(
+          normalizeCard(
+            updatedCards[
+              nextIndex
+            ]
+          )
+        );
+
+        setError(null);
+
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        });
+
+        return;
+      }
+
+      // ========================================================
+      // ALL CARDS SAVED
+      // ========================================================
+
+      console.log(
+        "========================================"
+      );
+
+      console.log(
+        "ALL CARDS SAVED SUCCESSFULLY"
+      );
+
+      console.log(
+        "TOTAL:",
+        updatedCards.length
+      );
+
+      console.log(
+        "========================================"
+      );
+
+      // --------------------------------------------------------
+      // Clear session storage
+      // --------------------------------------------------------
+
+      sessionStorage.removeItem(
+        "extractedCard"
+      );
+
+      sessionStorage.removeItem(
+        "extractedCards"
+      );
+
+      // --------------------------------------------------------
+      // Go to cards page
+      // --------------------------------------------------------
+
+      router.push(
+        "/cards"
+      );
+    } catch (err: any) {
+      console.error(
+        "SAVE CARD ERROR:",
+        err
+      );
+
+      setError(
+        err?.message ||
+          "Something went wrong while saving the card"
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ============================================================
+  // CONFIRM DUPLICATE SAVE
+  // ============================================================
+
+  const handleDuplicateSaveAnyway =
+    async () => {
+      if (!pendingSaveData) {
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // ======================================================
+        // SAVE DUPLICATE CARD
+        // ======================================================
+
+        const response =
+          await saveCard(
+            pendingSaveData
+          );
+
+        if (!response.success) {
+          throw new Error(
+            response.message ||
+              "Failed to save card"
+          );
+        }
+
+        console.log(
+          "DUPLICATE CARD SAVED SUCCESSFULLY"
+        );
+
+        // ======================================================
+        // CLOSE POPUP
+        // ======================================================
+
+        setShowDuplicateConfirm(
+          false
+        );
+
+        setPendingSaveData(
+          null
+        );
+
+        // ======================================================
+        // CHECK NEXT CARD
+        // ======================================================
+
+        if (
+          currentIndex <
+          cards.length - 1
+        ) {
+          const nextIndex =
+            currentIndex + 1;
+
+          setCurrentIndex(
+            nextIndex
+          );
+
+          setFormData(
+            normalizeCard(
+              cards[nextIndex]
+            )
+          );
+
+          setError(null);
+
+          window.scrollTo({
+            top: 0,
+            behavior: "smooth",
+          });
+
+          return;
+        }
+
+        // ======================================================
+        // ALL CARDS SAVED
+        // ======================================================
+
+        sessionStorage.removeItem(
+          "extractedCard"
+        );
+
+        sessionStorage.removeItem(
+          "extractedCards"
+        );
+
+        router.push(
+          "/cards"
+        );
+      } catch (err: any) {
+        console.error(
+          "DUPLICATE SAVE ERROR:",
+          err
+        );
+
+        setError(
+          err?.message ||
+            "Failed to save duplicate card"
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+  // ============================================================
+  // CANCEL DUPLICATE
+  // ============================================================
+
+  const handleDuplicateCancel =
+    () => {
+      if (isLoading) {
+        return;
+      }
+
+      setShowDuplicateConfirm(
+        false
+      );
+
+      setPendingSaveData(
+        null
+      );
+    };
+
+  // ============================================================
   // GOOGLE MAPS
   // ============================================================
 
   const openMap = () => {
-    if (
-      !formData.address
-    ) {
+    if (!formData.address) {
       return;
     }
 
@@ -882,29 +955,17 @@ export default function CardReviewForm() {
   // QR DATA
   // ============================================================
 
-  const qrCodes: string[] =
+  const qrCodes =
     Array.isArray(
       formData.qr_codes
-    )
-      ? formData.qr_codes.filter(
-          (
-            qr
-          ): qr is string =>
-            typeof qr ===
-              "string" &&
-            qr.trim().length >
-              0
-        )
-      : typeof formData.qr_raw ===
-          "string"
-        ? formData.qr_raw
-            .split(
-              " ||| "
-            )
-            .map(
-              (qr) =>
-                qr.trim()
-            )
+    ) &&
+    formData.qr_codes.length > 0
+      ? formData.qr_codes
+      : formData.qr_raw
+        ? String(
+            formData.qr_raw
+          )
+            .split(" ||| ")
             .filter(Boolean)
         : [];
 
@@ -951,9 +1012,7 @@ export default function CardReviewForm() {
               </p>
             </div>
 
-            {/* =================================================
-                CARD COUNTER
-            ================================================= */}
+            {/* CARD COUNTER */}
 
             {cards.length > 1 && (
               <div className="flex items-center gap-2 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2">
@@ -995,13 +1054,11 @@ export default function CardReviewForm() {
                   handlePrevious
                 }
                 disabled={
-                  currentIndex ===
-                    0 ||
+                  currentIndex === 0 ||
                   isLoading
                 }
               >
                 <ArrowLeft className="h-4 w-4 mr-2" />
-
                 Previous
               </Button>
 
@@ -1009,82 +1066,30 @@ export default function CardReviewForm() {
 
                 <p className="text-sm font-semibold text-gray-800">
                   Card{" "}
-                  {currentIndex +
-                    1}
+                  {currentIndex + 1}
                 </p>
 
                 <p className="text-xs text-gray-500 mt-1">
                   {currentIndex ===
                   cards.length - 1
                     ? "Last card"
-                    : "Review this card and continue"}
+                    : "Review and save this card"}
                 </p>
 
               </div>
 
-              {/* ------------------------------------------------
-                  NAVIGATION NEXT
-                  ------------------------------------------------ */}
-
               <Button
                 variant="outline"
-                onClick={() => {
-                  if (
-                    currentIndex <
-                    cards.length - 1
-                  ) {
-                    // Move without saving.
-                    // The actual Save & Next button
-                    // below performs the DB save.
-                    const updatedCards =
-                      [...cards];
-
-                    updatedCards[
-                      currentIndex
-                    ] = {
-                      ...formData,
-                    };
-
-                    setCards(
-                      updatedCards
-                    );
-
-                    const nextIndex =
-                      currentIndex +
-                      1;
-
-                    setCurrentIndex(
-                      nextIndex
-                    );
-
-                    setFormData(
-                      updatedCards[
-                        nextIndex
-                      ]
-                    );
-
-                    setError(
-                      null
-                    );
-
-                    window.scrollTo(
-                      {
-                        top: 0,
-                        behavior:
-                          "smooth",
-                      }
-                    );
-                  }
-                }}
+                onClick={
+                  handleNext
+                }
                 disabled={
                   currentIndex >=
-                    cards.length -
-                      1 ||
+                    cards.length - 1 ||
                   isLoading
                 }
               >
                 Next
-
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
 
@@ -1111,9 +1116,7 @@ export default function CardReviewForm() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-            {/* =================================================
-                FRONT
-            ================================================= */}
+            {/* FRONT */}
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
 
@@ -1165,9 +1168,7 @@ export default function CardReviewForm() {
 
             </div>
 
-            {/* =================================================
-                BACK
-            ================================================= */}
+            {/* BACK */}
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
 
@@ -1220,7 +1221,6 @@ export default function CardReviewForm() {
             </div>
 
           </div>
-
         </div>
 
         {/* =====================================================
@@ -1229,7 +1229,7 @@ export default function CardReviewForm() {
 
         <div className="flex flex-wrap gap-6 mb-8">
 
-          {/* COMPANY LOGO */}
+          {/* LOGO */}
 
           <div className="flex items-center gap-4">
 
@@ -1243,9 +1243,7 @@ export default function CardReviewForm() {
               />
             ) : (
               <div className="h-20 w-20 rounded-xl bg-gray-100 flex items-center justify-center">
-
                 <Building2 className="h-8 w-8 text-gray-400" />
-
               </div>
             )}
 
@@ -1265,7 +1263,7 @@ export default function CardReviewForm() {
 
           </div>
 
-          {/* QR SUMMARY */}
+          {/* QR */}
 
           <div className="flex items-center gap-4">
 
@@ -1290,20 +1288,16 @@ export default function CardReviewForm() {
             <div>
 
               <p className="text-sm font-medium text-gray-700">
-
                 QR Code
                 {qrCount > 1
                   ? "s"
                   : ""}
-
               </p>
 
               <p className="text-xs text-gray-500">
-
                 {qrCount > 0
                   ? `${qrCount} detected`
                   : "Not found"}
-
               </p>
 
             </div>
@@ -1313,7 +1307,7 @@ export default function CardReviewForm() {
         </div>
 
         {/* =====================================================
-            EXTRACTED DETAILS
+            EXTRACTED INFORMATION
         ===================================================== */}
 
         <div className="mb-4">
@@ -1330,15 +1324,12 @@ export default function CardReviewForm() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-          {/* OWNER */}
-
           <Input
             id="owner_name"
             name="owner_name"
             label="Owner / Person Name"
             value={
-              formData.owner_name ||
-              ""
+              formData.owner_name || ""
             }
             onChange={
               handleChange
@@ -1346,15 +1337,12 @@ export default function CardReviewForm() {
             placeholder="Rahul Patel"
           />
 
-          {/* COMPANY */}
-
           <Input
             id="company_name"
             name="company_name"
             label="Company Name"
             value={
-              formData.company_name ||
-              ""
+              formData.company_name || ""
             }
             onChange={
               handleChange
@@ -1362,15 +1350,12 @@ export default function CardReviewForm() {
             placeholder="ABC Technologies"
           />
 
-          {/* DESIGNATION */}
-
           <Input
             id="designation"
             name="designation"
             label="Designation"
             value={
-              formData.designation ||
-              ""
+              formData.designation || ""
             }
             onChange={
               handleChange
@@ -1378,15 +1363,12 @@ export default function CardReviewForm() {
             placeholder="Founder & CEO"
           />
 
-          {/* PHONE */}
-
           <Input
             id="phone"
             name="phone"
             label="Phone Number"
             value={
-              formData.phone ||
-              ""
+              formData.phone || ""
             }
             onChange={
               handleChange
@@ -1394,16 +1376,13 @@ export default function CardReviewForm() {
             placeholder="+91 9876543210"
           />
 
-          {/* EMAIL */}
-
           <Input
             id="email"
             name="email"
             type="email"
             label="Email"
             value={
-              formData.email ||
-              ""
+              formData.email || ""
             }
             onChange={
               handleChange
@@ -1411,15 +1390,12 @@ export default function CardReviewForm() {
             placeholder="contact@company.com"
           />
 
-          {/* WEBSITE */}
-
           <Input
             id="website_url"
             name="website_url"
             label="Website"
             value={
-              formData.website_url ||
-              ""
+              formData.website_url || ""
             }
             onChange={
               handleChange
@@ -1427,15 +1403,12 @@ export default function CardReviewForm() {
             placeholder="https://company.com"
           />
 
-          {/* INSTAGRAM */}
-
           <Input
             id="instagram_url"
             name="instagram_url"
             label="Instagram"
             value={
-              formData.instagram_url ||
-              ""
+              formData.instagram_url || ""
             }
             onChange={
               handleChange
@@ -1443,15 +1416,12 @@ export default function CardReviewForm() {
             placeholder="@username or full link"
           />
 
-          {/* FACEBOOK */}
-
           <Input
             id="facebook_url"
             name="facebook_url"
             label="Facebook"
             value={
-              formData.facebook_url ||
-              ""
+              formData.facebook_url || ""
             }
             onChange={
               handleChange
@@ -1459,15 +1429,12 @@ export default function CardReviewForm() {
             placeholder="Facebook profile / page link"
           />
 
-          {/* LINKEDIN */}
-
           <Input
             id="linkedin_url"
             name="linkedin_url"
             label="LinkedIn"
             value={
-              formData.linkedin_url ||
-              ""
+              formData.linkedin_url || ""
             }
             onChange={
               handleChange
@@ -1475,15 +1442,12 @@ export default function CardReviewForm() {
             placeholder="LinkedIn profile link"
           />
 
-          {/* GST */}
-
           <Input
             id="gst_number"
             name="gst_number"
             label="GST Number"
             value={
-              formData.gst_number ||
-              ""
+              formData.gst_number || ""
             }
             onChange={
               handleChange
@@ -1535,8 +1499,7 @@ export default function CardReviewForm() {
             name="address"
             rows={3}
             value={
-              formData.address ||
-              ""
+              formData.address || ""
             }
             onChange={
               handleChange
@@ -1579,8 +1542,7 @@ export default function CardReviewForm() {
             name="other_details"
             rows={3}
             value={
-              formData.other_details ||
-              ""
+              formData.other_details || ""
             }
             onChange={
               handleChange
@@ -1603,13 +1565,11 @@ export default function CardReviewForm() {
               <QrCode className="h-5 w-5 text-green-600" />
 
               <p className="font-medium text-green-800">
-
                 QR Code
                 {qrCount > 1
                   ? "s"
                   : ""}{" "}
                 Detected
-
               </p>
 
             </div>
@@ -1625,9 +1585,7 @@ export default function CardReviewForm() {
                 >
 
                   <p className="text-xs text-green-600 mb-1">
-                    QR{" "}
-                    {index +
-                      1}
+                    QR {index + 1}
                   </p>
 
                   <p className="text-sm text-green-700 break-all">
@@ -1657,8 +1615,6 @@ export default function CardReviewForm() {
 
         <div className="mt-8 flex flex-col sm:flex-row gap-3">
 
-          {/* CANCEL */}
-
           <Button
             variant="outline"
             onClick={() =>
@@ -1678,15 +1634,15 @@ export default function CardReviewForm() {
 
           {/* =================================================
               MULTIPLE CARDS
-              SAVE & NEXT
           ================================================= */}
 
           {cards.length > 1 &&
           currentIndex <
             cards.length - 1 ? (
+
             <Button
               onClick={
-                handleSave
+                handleNext
               }
               className="flex-1"
               isLoading={
@@ -1697,17 +1653,13 @@ export default function CardReviewForm() {
               }
             >
 
-              <Save className="h-4 w-4 mr-2" />
-
               Save & Next
 
               <ArrowRight className="h-4 w-4 ml-2" />
 
             </Button>
+
           ) : (
-            /* =================================================
-               LAST CARD / SINGLE CARD
-            ================================================= */
 
             <Button
               onClick={
@@ -1729,6 +1681,7 @@ export default function CardReviewForm() {
                 : "Confirm & Save"}
 
             </Button>
+
           )}
 
         </div>
@@ -1740,36 +1693,16 @@ export default function CardReviewForm() {
         {showDuplicateConfirm && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
 
-            {/* BACKDROP */}
-
             <div
               className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-              onClick={() => {
-                if (
-                  !isLoading
-                ) {
-                  setShowDuplicateConfirm(
-                    false
-                  );
-
-                  setPendingSaveData(
-                    null
-                  );
-
-                  setPendingNextIndex(
-                    null
-                  );
-                }
-              }}
+              onClick={
+                handleDuplicateCancel
+              }
             />
-
-            {/* MODAL */}
 
             <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
 
               <div className="flex flex-col items-center text-center">
-
-                {/* ICON */}
 
                 <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mb-4">
 
@@ -1777,13 +1710,9 @@ export default function CardReviewForm() {
 
                 </div>
 
-                {/* TITLE */}
-
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
                   Company Already Exists
                 </h3>
-
-                {/* MESSAGE */}
 
                 <p className="text-sm text-gray-600 mb-6">
 
@@ -1807,28 +1736,14 @@ export default function CardReviewForm() {
 
                 </p>
 
-                {/* BUTTONS */}
-
                 <div className="flex gap-3 w-full">
-
-                  {/* CANCEL */}
 
                   <Button
                     variant="outline"
                     className="flex-1"
-                    onClick={() => {
-                      setShowDuplicateConfirm(
-                        false
-                      );
-
-                      setPendingSaveData(
-                        null
-                      );
-
-                      setPendingNextIndex(
-                        null
-                      );
-                    }}
+                    onClick={
+                      handleDuplicateCancel
+                    }
                     disabled={
                       isLoading
                     }
@@ -1836,14 +1751,10 @@ export default function CardReviewForm() {
                     No, Cancel
                   </Button>
 
-                  {/* SAVE ANYWAY */}
-
                   <Button
                     className="flex-1"
-                    onClick={() =>
-                      performSave(
-                        pendingSaveData
-                      )
+                    onClick={
+                      handleDuplicateSaveAnyway
                     }
                     isLoading={
                       isLoading

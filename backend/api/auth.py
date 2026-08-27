@@ -1,7 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from datetime import datetime, timedelta
 
 from backend.core.supabase import supabase
+from backend.core.auth import (
+    create_access_token,
+    get_current_user,
+)
 
 
 router = APIRouter(
@@ -26,6 +31,9 @@ class LoginRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     user_id: str
+
+class RetentionRequest(BaseModel):
+    retention_days: int | None = None
 
 # ==========================================
 # CREATE ACCOUNT
@@ -126,6 +134,9 @@ def login(data: LoginRequest):
                 status_code=401,
                 detail="Incorrect password"
             )
+        access_token = create_access_token(
+            str(user.get("id"))
+        )
 
         # Successful login
         return {
@@ -135,7 +146,8 @@ def login(data: LoginRequest):
                 "id": user.get("id"),
                 "email": user.get("email"),
                 "full_name": user.get("full_name")
-            }
+            },
+            "access_token": access_token
         }
 
     except HTTPException:
@@ -186,6 +198,155 @@ def logout(data: LogoutRequest):
 
     except Exception as e:
         print("LOGOUT ERROR:", repr(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+# ==========================================
+# GET CARD RETENTION SETTING
+# ==========================================
+
+@router.get("/retention")
+def get_retention(
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        response = (
+            supabase
+            .table("login")
+            .select("card_retention_days")
+            .eq("id", current_user["id"])
+            .execute()
+        )
+
+        if not response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        return {
+            "success": True,
+            "retention_days": response.data[0].get(
+                "card_retention_days"
+            )
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("GET RETENTION ERROR:", repr(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ==========================================
+# UPDATE CARD RETENTION SETTING
+# ==========================================
+
+@router.put("/retention")
+def update_retention(
+    data: RetentionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        retention_days = data.retention_days
+
+        if retention_days not in [1, 7, 30, None]:
+            raise HTTPException(
+                status_code=400,
+                detail="Retention must be 1, 7, 30 days or Never"
+            )
+
+        user_id = str(current_user["id"])
+
+        # Save preference for this user
+        (
+            supabase
+            .table("login")
+            .update({
+                "card_retention_days": retention_days
+            })
+            .eq("id", user_id)
+            .execute()
+        )
+
+        # ==========================================
+        # NEVER
+        # ==========================================
+
+        if retention_days is None:
+            (
+                supabase
+                .table("business_cards")
+                .update({
+                    "expires_at": None
+                })
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        # ==========================================
+        # 1 / 7 / 30 DAYS
+        # ==========================================
+
+        else:
+            cards_response = (
+                supabase
+                .table("business_cards")
+                .select("id, created_at")
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            for card in cards_response.data or []:
+                created_at = card.get("created_at")
+
+                if not created_at:
+                    continue
+
+                created_datetime = datetime.fromisoformat(
+                    created_at.replace(
+                        "Z",
+                        "+00:00"
+                    )
+                )
+
+                expires_at = (
+                    created_datetime
+                    + timedelta(
+                        days=retention_days
+                    )
+                )
+
+                (
+                    supabase
+                    .table("business_cards")
+                    .update({
+                        "expires_at": expires_at.isoformat()
+                    })
+                    .eq("id", card["id"])
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+
+        return {
+            "success": True,
+            "message": "Card retention setting updated successfully",
+            "retention_days": retention_days
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("UPDATE RETENTION ERROR:", repr(e))
 
         raise HTTPException(
             status_code=500,

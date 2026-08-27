@@ -40,6 +40,14 @@ export default function LoginPage() {
         JSON.stringify(data.user)
       );
 
+        // Store logged-in user
+      if (data.access_token) {
+      localStorage.setItem(
+        "card_scanner_token",
+        data.access_token
+      );
+    }
+
       // Go to application
       router.push("/");
 
