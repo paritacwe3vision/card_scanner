@@ -186,18 +186,68 @@ def create_card(
 
     return saved_card
 
+# =====================================================
+# DELETE EXPIRED BUSINESS CARDS
+# =====================================================
+
+def delete_expired_cards(
+    user_id: str,
+):
+    """
+    Delete business cards whose retention
+    period has expired.
+    """
+
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    try:
+        (
+            supabase
+            .table(TABLE_NAME)
+            .delete()
+            .eq(
+                "user_id",
+                user_id,
+            )
+            .lte(
+                "expires_at",
+                now,
+            )
+            .execute()
+        )
+
+    except Exception as e:
+        print(
+            "DELETE EXPIRED CARDS ERROR:",
+            repr(e),
+        )
 
 # =====================================================
 # GET USER'S BUSINESS CARDS
 # =====================================================
-
 def get_all_cards(
     user_id: str,
 ):
     """
-    Fetch only business cards belonging to
-    the currently logged-in user.
+    Fetch only active business cards belonging
+    to the currently logged-in user.
+
+    Expired cards are removed before fetching.
     """
+
+    # =================================================
+    # DELETE EXPIRED CARDS FIRST
+    # =================================================
+
+    delete_expired_cards(
+        user_id
+    )
+
+    # =================================================
+    # FETCH REMAINING CARDS
+    # =================================================
 
     response = (
         supabase
@@ -215,7 +265,6 @@ def get_all_cards(
     )
 
     return response.data or []
-
 
 # =====================================================
 # DELETE USER'S BUSINESS CARD

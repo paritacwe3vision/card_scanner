@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.core.supabase import supabase
 from backend.core.auth import (
@@ -335,6 +335,29 @@ def update_retention(
                     .eq("user_id", user_id)
                     .execute()
                 )
+
+            # ==========================================
+            # DELETE CARDS THAT ARE ALREADY EXPIRED
+            # ==========================================
+
+            now = datetime.now(
+                timezone.utc
+            ).isoformat()
+
+            (
+                supabase
+                .table("business_cards")
+                .delete()
+                .eq(
+                    "user_id",
+                    user_id,
+                )
+                .lte(
+                    "expires_at",
+                    now,
+                )
+                .execute()
+            )
 
         return {
             "success": True,

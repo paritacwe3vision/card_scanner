@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-
+import httpx
 import jwt
 from fastapi import Header, HTTPException
 
@@ -21,7 +21,6 @@ def create_access_token(user_id: str) -> str:
         settings.jwt_secret,
         algorithm=ALGORITHM,
     )
-
 
 def get_current_user(
     authorization: str | None = Header(default=None),
@@ -67,13 +66,45 @@ def get_current_user(
             detail="Invalid login session",
         )
 
-    response = (
-        supabase
-        .table("login")
-        .select("id, email, full_name")
-        .eq("id", user_id)
-        .execute()
-    )
+    # =====================================================
+    # GET USER FROM SUPABASE
+    # =====================================================
+
+    try:
+        response = (
+            supabase
+            .table("login")
+            .select("id, email, full_name")
+            .eq("id", user_id)
+            .execute()
+        )
+
+    except httpx.RequestError as e:
+        print(
+            "SUPABASE CONNECTION ERROR:",
+            repr(e)
+        )
+
+        # Retry once
+        try:
+            response = (
+                supabase
+                .table("login")
+                .select("id, email, full_name")
+                .eq("id", user_id)
+                .execute()
+            )
+
+        except httpx.RequestError as retry_error:
+            print(
+                "SUPABASE RETRY ERROR:",
+                repr(retry_error)
+            )
+
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to connect to database. Please try again."
+            )
 
     if not response.data:
         raise HTTPException(
